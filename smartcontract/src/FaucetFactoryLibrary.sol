@@ -1,12 +1,9 @@
-
-
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./faucet.sol";
 import "./TransactionLibrary.sol";
 
-interface IFaucetDrops {
+interface IFaucetDropsBackend {
     function owner() external view returns (address);
     function name() external view returns (string memory);
     function claimAmount() external view returns (uint256);
@@ -28,36 +25,25 @@ library FaucetFactoryLibrary {
         mapping(address => bool) deletedFaucets;
     }
 
-    event FaucetCreated(address indexed faucet, address owner, string name, address token, address backend);
+    struct FaucetDetails {
+        address faucetAddress;
+        address owner;
+        string name;
+        uint256 claimAmount;
+        address tokenAddress;
+        uint256 startTime;
+        uint256 endTime;
+        bool isClaimActive;
+        uint256 balance;
+        bool isEther;
+        bool useBackend;
+    }
+
     event TransactionRecorded(address indexed faucet, string transactionType, address initiator, uint256 amount, bool isEther, uint256 timestamp);
 
     error FaucetNotRegistered();
     error InvalidFaucet();
     error FaucetDeletedError(address faucet);
-
-    function createFaucet(
-        Storage storage self,
-        string memory _name,
-        address _token,
-        address _backend,
-        bool _useBackend,
-        address owner,
-        address _factory
-    ) internal returns (address) {
-        // Create new faucet with the specified owner
-        FaucetDrops faucet = new FaucetDrops(_name, _token, _backend, _useBackend, owner, _factory);
-        address faucetAddress = address(faucet);
-
-        // Add faucet to global registry
-        self.faucets.push(faucetAddress);
-        // Add faucet to the owner's personal list
-        self.userFaucets[owner].push(faucetAddress);
-
-        // Record the creation transaction
-        self.allTransactions.recordTransaction(faucetAddress, "CreateFaucet", owner, 0, false);
-        emit FaucetCreated(faucetAddress, owner, _name, _token, _backend);
-        return faucetAddress;
-    }
 
     function recordTransaction(
         Storage storage self,
@@ -121,7 +107,9 @@ library FaucetFactoryLibrary {
     ) internal view returns (FaucetDetails memory) {
         if (!_isFaucetRegistered(self, faucetAddress)) revert FaucetNotRegistered();
         if (self.deletedFaucets[faucetAddress]) revert FaucetDeletedError(faucetAddress);
-        IFaucetDrops faucet = IFaucetDrops(faucetAddress);
+        
+        // Both faucet types now have the same interface, so we can use either
+        IFaucetDropsBackend faucet = IFaucetDropsBackend(faucetAddress);
         (uint256 balance, bool isEther) = faucet.getFaucetBalance();
         return FaucetDetails({
             faucetAddress: faucetAddress,
@@ -167,20 +155,5 @@ library FaucetFactoryLibrary {
             unchecked { i++; }
         }
         return activeFaucets;
-    }
-
-
-    struct FaucetDetails {
-        address faucetAddress;
-        address owner;
-        string name;
-        uint256 claimAmount;
-        address tokenAddress;
-        uint256 startTime;
-        uint256 endTime;
-        bool isClaimActive;
-        uint256 balance;
-        bool isEther;
-        bool useBackend;
     }
 }

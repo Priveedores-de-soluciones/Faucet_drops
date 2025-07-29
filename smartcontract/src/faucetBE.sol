@@ -6,14 +6,13 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./IFaucetFactory.sol";
 
-contract DropListFaucet is Ownable, ReentrancyGuard {
+contract DropCodeFaucet is Ownable, ReentrancyGuard {
     string public name;
     uint256 public claimAmount;
     address public token;
     uint256 public startTime;
     uint256 public endTime;
     mapping(address => bool) public hasClaimed;
-    mapping(address => bool) public isWhitelisted;
     mapping(address => bool) public isAdmin;
     address[] public admins;
     address public BACKEND;
@@ -35,7 +34,6 @@ contract DropListFaucet is Ownable, ReentrancyGuard {
     event Funded(address indexed funder, uint256 amount, uint256 backendFee, uint256 vaultFee, bool isEther);
     event Withdrawn(address indexed owner, uint256 amount, bool isEther);
     event ClaimParametersUpdated(uint256 claimAmount, uint256 startTime, uint256 endTime);
-    event WhitelistUpdated(address indexed user, bool status);
     event FaucetCreated(address indexed faucet, string name, address token);
     event AdminAdded(address indexed admin);
     event AdminRemoved(address indexed admin);
@@ -55,7 +53,6 @@ contract DropListFaucet is Ownable, ReentrancyGuard {
     error ClaimAmountNotSet();
     error InsufficientBalance();
     error TransferFailed();
-    error NotWhitelisted();
     error AlreadyClaimed();
     error InvalidAmount();
     error InvalidTime();
@@ -146,7 +143,7 @@ contract DropListFaucet is Ownable, ReentrancyGuard {
     }
 
     function getUseBackend() external view checkNotDeleted returns (bool) {
-        return false;
+        return true;
     }
 
     function fund(uint256 _tokenAmount) external payable nonReentrant whenNotPaused checkNotDeleted {
@@ -203,7 +200,6 @@ contract DropListFaucet is Ownable, ReentrancyGuard {
         for (uint256 i = 0; i < users.length; ) {
             address user = users[i];
             if (user == address(0)) revert InvalidAddress();
-            if (!isWhitelisted[user]) revert NotWhitelisted();
             if (hasClaimed[user]) revert AlreadyClaimed();
             
             hasClaimed[user] = true;
@@ -260,25 +256,6 @@ contract DropListFaucet is Ownable, ReentrancyGuard {
         emit ClaimParametersUpdated(_claimAmount, _startTime, _endTime);
     }
 
-    function setWhitelist(address user, bool status) external onlyAdmin whenNotPaused checkNotDeleted {
-        if (user == address(0)) revert InvalidAddress();
-        isWhitelisted[user] = status;
-        IFaucetFactory(factory).recordTransaction(address(this), "SetWhitelist", msg.sender, status ? 1 : 0, false);
-        emit WhitelistUpdated(user, status);
-    }
-
-    function setWhitelistBatch(address[] calldata users, bool status) external onlyAdmin whenNotPaused checkNotDeleted {
-        if (users.length == 0) revert NoUsersProvided();
-
-        for (uint256 i = 0; i < users.length; ) {
-            if (users[i] == address(0)) revert InvalidAddress();
-            isWhitelisted[users[i]] = status;
-            IFaucetFactory(factory).recordTransaction(address(this), "SetWhitelistBatch", msg.sender, status ? 1 : 0, false);
-            emit WhitelistUpdated(users[i], status);
-            unchecked { i++; }
-        }
-    }
-
     function resetClaimedSingle(address user) external onlyAdmin whenNotPaused checkNotDeleted {
         if (user == address(0)) revert InvalidAddress();
         if (!hasClaimed[user]) revert InvalidAddress();
@@ -287,7 +264,24 @@ contract DropListFaucet is Ownable, ReentrancyGuard {
         emit ClaimReset(user);
     }
 
-        function resetAllClaimed() external onlyAdmin whenNotPaused checkNotDeleted {
+    function resetClaimedBatch(address[] calldata users) external onlyAdmin whenNotPaused checkNotDeleted {
+        if (users.length == 0) revert NoUsersProvided();
+
+        uint256 resetCount = 0;
+        for (uint256 i = 0; i < users.length; ) {
+            if (users[i] != address(0) && hasClaimed[users[i]]) {
+                hasClaimed[users[i]] = false;
+                emit ClaimReset(users[i]);
+                resetCount++;
+            }
+            unchecked { i++; }
+        }
+
+        IFaucetFactory(factory).recordTransaction(address(this), "ResetClaimedBatch", msg.sender, resetCount, false);
+        emit BatchClaimReset(resetCount);
+    }
+
+    function resetAllClaimed() external onlyAdmin whenNotPaused checkNotDeleted {
         uint256 resetCount = 0;
         for (uint256 i = 0; i < claims.length; ) {
             address user = claims[i].recipient;
@@ -342,10 +336,9 @@ contract DropListFaucet is Ownable, ReentrancyGuard {
         return isAdmin[_address];
     }
 
-    function getClaimStatus(address user) external view checkNotDeleted returns (bool claimed, bool whitelisted, bool canClaim) {
+    function getClaimStatus(address user) external view checkNotDeleted returns (bool claimed, bool canClaim) {
         claimed = hasClaimed[user];
-        whitelisted = isWhitelisted[user];
-        canClaim = whitelisted && !claimed && isClaimActive();
+        canClaim = !claimed && isClaimActive();
     }
 
     function setPaused(bool _paused) external onlyAdmin checkNotDeleted {

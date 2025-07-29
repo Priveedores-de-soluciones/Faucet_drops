@@ -5,10 +5,11 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "./factoryLibrary.sol";
 import "./transaction.sol";
 import "./IFaucetFactory.sol";
-import "./faucet.sol";
+import "./faucetBE.sol";
 
 
-contract FaucetFactoryDL is Ownable, IFaucetFactory {
+
+contract FaucetFactoryDC is Ownable, IFaucetFactory {
     using FaucetFactoryLibrary for FaucetFactoryLibrary.Storage;
     using TransactionLibrary for TransactionLibrary.Transaction[];
     
@@ -23,14 +24,13 @@ contract FaucetFactoryDL is Ownable, IFaucetFactory {
         return Ownable.owner();
     }
 
-
-    function createWhitelistFaucet(
+    function createBackendFaucet(
         string memory _name,
         address _token,
         address _backend
     ) external returns (address) {
-        // Create new whitelist faucet directly (not in library to reduce contract size)
-        DropListFaucet faucet = new DropListFaucet(_name, _token, _backend, msg.sender, address(this));
+        // Create new backend faucet directly (not in library to reduce contract size)
+        DropCodeFaucet faucet = new DropCodeFaucet(_name, _token, _backend, msg.sender, address(this));
         address faucetAddress = address(faucet);
 
         // Add to registry using library
@@ -38,11 +38,13 @@ contract FaucetFactoryDL is Ownable, IFaucetFactory {
         factoryStorage.userFaucets[msg.sender].push(faucetAddress);
 
         // Record transaction
-        factoryStorage.allTransactions.recordTransaction(faucetAddress, "CreateWhitelistFaucet", msg.sender, 0, false);
+        factoryStorage.allTransactions.recordTransaction(faucetAddress, "CreateBackendFaucet", msg.sender, 0, false);
         
         emit FaucetCreated(faucetAddress, msg.sender, _name, _token, _backend);
         return faucetAddress;
     }
+
+   
 
     function recordTransaction(
         address _faucetAddress,

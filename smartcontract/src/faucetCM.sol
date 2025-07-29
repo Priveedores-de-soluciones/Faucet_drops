@@ -6,14 +6,13 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./IFaucetFactory.sol";
 
-contract DropListFaucet is Ownable, ReentrancyGuard {
+contract CustomFaucet is Ownable, ReentrancyGuard {
     string public name;
-    uint256 public claimAmount;
     address public token;
     uint256 public startTime;
     uint256 public endTime;
     mapping(address => bool) public hasClaimed;
-    mapping(address => bool) public isWhitelisted;
+    mapping(address => uint256) public customClaimAmounts;
     mapping(address => bool) public isAdmin;
     address[] public admins;
     address public BACKEND;
@@ -35,11 +34,12 @@ contract DropListFaucet is Ownable, ReentrancyGuard {
     event Funded(address indexed funder, uint256 amount, uint256 backendFee, uint256 vaultFee, bool isEther);
     event Withdrawn(address indexed owner, uint256 amount, bool isEther);
     event ClaimParametersUpdated(uint256 claimAmount, uint256 startTime, uint256 endTime);
-    event WhitelistUpdated(address indexed user, bool status);
+    event CustomClaimAmountSet(address indexed user, uint256 amount);
+    event CustomClaimAmountRemoved(address indexed user);
+    event BatchCustomClaimAmountsSet(uint256 userCount);
     event FaucetCreated(address indexed faucet, string name, address token);
     event AdminAdded(address indexed admin);
     event AdminRemoved(address indexed admin);
-    event ClaimReset(address indexed user);
     event BatchClaimReset(uint256 userCount);
     event BackendUpdated(address indexed newBackend);
     event Paused(bool paused);
@@ -55,12 +55,13 @@ contract DropListFaucet is Ownable, ReentrancyGuard {
     error ClaimAmountNotSet();
     error InsufficientBalance();
     error TransferFailed();
-    error NotWhitelisted();
+    error NoCustomClaimAmount();
     error AlreadyClaimed();
     error InvalidAmount();
     error InvalidTime();
     error ContractPaused();
     error EmptyName();
+    error ArrayLengthMismatch();
     error FaucetDeletedError(address faucet);
     error CannotRemoveFactoryOwner();
 
@@ -97,7 +98,6 @@ contract DropListFaucet is Ownable, ReentrancyGuard {
         name = _name;
         BACKEND = _backend;
         token = _token;
-        claimAmount = _token == address(0) ? 0 ether : 0;
         factory = _factory;
         
         isAdmin[_owner] = true;
@@ -145,8 +145,59 @@ contract DropListFaucet is Ownable, ReentrancyGuard {
         return admins;
     }
 
-    function getUseBackend() external view checkNotDeleted returns (bool) {
-        return false;
+    function getUseBackend() external view  checkNotDeleted returns (bool) {
+        return true; // Custom faucet uses backend
+    }
+
+    function setCustomClaimAmount(address user, uint256 amount) external onlyAdmin whenNotPaused checkNotDeleted {
+        if (user == address(0)) revert InvalidAddress();
+
+        if (amount == 0) {
+            delete customClaimAmounts[user];
+            IFaucetFactory(factory).recordTransaction(address(this), "RemoveCustomClaimAmount", msg.sender, 0, false);
+            emit CustomClaimAmountRemoved(user);
+        } else {
+            customClaimAmounts[user] = amount;
+            IFaucetFactory(factory).recordTransaction(address(this), "SetCustomClaimAmount", msg.sender, amount, false);
+            emit CustomClaimAmountSet(user, amount);
+        }
+    }
+
+    function setCustomClaimAmountsBatch(
+        address[] calldata users, 
+        uint256[] calldata amounts
+    ) external onlyAdmin whenNotPaused checkNotDeleted {
+        if (users.length == 0) revert NoUsersProvided();
+        if (users.length != amounts.length) revert ArrayLengthMismatch();
+
+        uint256 setCount = 0;
+        for (uint256 i = 0; i < users.length; ) {
+            if (users[i] == address(0)) revert InvalidAddress();
+            
+            if (amounts[i] == 0) {
+                if (customClaimAmounts[users[i]] > 0) {
+                    delete customClaimAmounts[users[i]];
+                    emit CustomClaimAmountRemoved(users[i]);
+                    setCount++;
+                }
+            } else {
+                customClaimAmounts[users[i]] = amounts[i];
+                emit CustomClaimAmountSet(users[i], amounts[i]);
+                setCount++;
+            }
+            unchecked { i++; }
+        }
+
+        IFaucetFactory(factory).recordTransaction(address(this), "SetCustomClaimAmountsBatch", msg.sender, setCount, false);
+        emit BatchCustomClaimAmountsSet(setCount);
+    }
+
+    function getCustomClaimAmount(address user) external view checkNotDeleted returns (uint256) {
+        return customClaimAmounts[user];
+    }
+
+    function hasCustomClaimAmount(address user) external view checkNotDeleted returns (bool) {
+        return customClaimAmounts[user] > 0;
     }
 
     function fund(uint256 _tokenAmount) external payable nonReentrant whenNotPaused checkNotDeleted {
@@ -190,38 +241,47 @@ contract DropListFaucet is Ownable, ReentrancyGuard {
         if (users.length == 0) revert NoUsersProvided();
         if (block.timestamp < startTime) revert ClaimPeriodNotStarted();
         if (block.timestamp > endTime) revert ClaimPeriodEnded();
-        if (claimAmount == 0) revert ClaimAmountNotSet();
 
-        uint256 totalAmount = users.length * claimAmount;
+        // Calculate total amount needed
+        uint256 totalAmount = 0;
+        for (uint256 i = 0; i < users.length; ) {
+            if (customClaimAmounts[users[i]] == 0) revert NoCustomClaimAmount();
+            totalAmount += customClaimAmounts[users[i]];
+            unchecked { i++; }
+        }
 
+        // Check sufficient balance
         if (token == address(0)) {
             if (address(this).balance < totalAmount) revert InsufficientBalance();
         } else {
             if (IERC20(token).balanceOf(address(this)) < totalAmount) revert InsufficientBalance();
         }
 
+        // Process claims
         for (uint256 i = 0; i < users.length; ) {
             address user = users[i];
             if (user == address(0)) revert InvalidAddress();
-            if (!isWhitelisted[user]) revert NotWhitelisted();
+            if (customClaimAmounts[user] == 0) revert NoCustomClaimAmount();
             if (hasClaimed[user]) revert AlreadyClaimed();
+
+            uint256 userClaimAmount = customClaimAmounts[user];
             
             hasClaimed[user] = true;
             claims.push(ClaimDetail({
                 recipient: user,
-                amount: claimAmount,
+                amount: userClaimAmount,
                 timestamp: block.timestamp
             }));
 
             if (token == address(0)) {
-                (bool sent, ) = user.call{value: claimAmount}("");
+                (bool sent, ) = user.call{value: userClaimAmount}("");
                 if (!sent) revert TransferFailed();
-                IFaucetFactory(factory).recordTransaction(address(this), "Claim", user, claimAmount, true);
-                emit Claimed(user, claimAmount, true);
+                IFaucetFactory(factory).recordTransaction(address(this), "Claim", user, userClaimAmount, true);
+                emit Claimed(user, userClaimAmount, true);
             } else {
-                if (!IERC20(token).transfer(user, claimAmount)) revert TransferFailed();
-                IFaucetFactory(factory).recordTransaction(address(this), "Claim", user, claimAmount, false);
-                emit Claimed(user, claimAmount, false);
+                if (!IERC20(token).transfer(user, userClaimAmount)) revert TransferFailed();
+                IFaucetFactory(factory).recordTransaction(address(this), "Claim", user, userClaimAmount, false);
+                emit Claimed(user, userClaimAmount, false);
             }
             unchecked { i++; }
         }
@@ -244,56 +304,28 @@ contract DropListFaucet is Ownable, ReentrancyGuard {
         }
     }
 
+
     function getAllClaims() external view checkNotDeleted returns (ClaimDetail[] memory) {
         return claims;
     }
 
-    function setClaimParameters(uint256 _claimAmount, uint256 _startTime, uint256 _endTime) external onlyAdmin whenNotPaused checkNotDeleted {
-        if (_claimAmount == 0) revert InvalidAmount();
+    function setClaimParameters(uint256 _startTime, uint256 _endTime) external onlyAdmin whenNotPaused checkNotDeleted {
         if (_startTime < block.timestamp) revert InvalidTime();
         if (_endTime <= _startTime) revert InvalidTime();
 
-        claimAmount = _claimAmount;
         startTime = _startTime;
         endTime = _endTime;
-        IFaucetFactory(factory).recordTransaction(address(this), "SetClaimParameters", msg.sender, _claimAmount, false);
-        emit ClaimParametersUpdated(_claimAmount, _startTime, _endTime);
+        IFaucetFactory(factory).recordTransaction(address(this), "SetClaimParameters", msg.sender, 0, false);
+        emit ClaimParametersUpdated(0, _startTime, _endTime);
     }
 
-    function setWhitelist(address user, bool status) external onlyAdmin whenNotPaused checkNotDeleted {
-        if (user == address(0)) revert InvalidAddress();
-        isWhitelisted[user] = status;
-        IFaucetFactory(factory).recordTransaction(address(this), "SetWhitelist", msg.sender, status ? 1 : 0, false);
-        emit WhitelistUpdated(user, status);
-    }
-
-    function setWhitelistBatch(address[] calldata users, bool status) external onlyAdmin whenNotPaused checkNotDeleted {
-        if (users.length == 0) revert NoUsersProvided();
-
-        for (uint256 i = 0; i < users.length; ) {
-            if (users[i] == address(0)) revert InvalidAddress();
-            isWhitelisted[users[i]] = status;
-            IFaucetFactory(factory).recordTransaction(address(this), "SetWhitelistBatch", msg.sender, status ? 1 : 0, false);
-            emit WhitelistUpdated(users[i], status);
-            unchecked { i++; }
-        }
-    }
-
-    function resetClaimedSingle(address user) external onlyAdmin whenNotPaused checkNotDeleted {
-        if (user == address(0)) revert InvalidAddress();
-        if (!hasClaimed[user]) revert InvalidAddress();
-        hasClaimed[user] = false;
-        IFaucetFactory(factory).recordTransaction(address(this), "ResetClaimedSingle", msg.sender, 0, false);
-        emit ClaimReset(user);
-    }
-
-        function resetAllClaimed() external onlyAdmin whenNotPaused checkNotDeleted {
+   
+    function resetAllClaimed() external onlyAdmin whenNotPaused checkNotDeleted {
         uint256 resetCount = 0;
         for (uint256 i = 0; i < claims.length; ) {
             address user = claims[i].recipient;
             if (hasClaimed[user]) {
                 hasClaimed[user] = false;
-                emit ClaimReset(user);
                 resetCount++;
             }
             unchecked { i++; }
@@ -335,17 +367,23 @@ contract DropListFaucet is Ownable, ReentrancyGuard {
     }
 
     function isClaimActive() public view checkNotDeleted returns (bool) {
-        return block.timestamp >= startTime && block.timestamp <= endTime && claimAmount > 0;
+        return block.timestamp >= startTime && block.timestamp <= endTime;
     }
 
     function getAdminStatus(address _address) external view checkNotDeleted returns (bool) {
         return isAdmin[_address];
     }
 
-    function getClaimStatus(address user) external view checkNotDeleted returns (bool claimed, bool whitelisted, bool canClaim) {
+    function getClaimStatus(address user) external view checkNotDeleted returns (
+        bool claimed, 
+        bool hasCustomAmount, 
+        uint256 customAmount,
+        bool canClaim
+    ) {
         claimed = hasClaimed[user];
-        whitelisted = isWhitelisted[user];
-        canClaim = whitelisted && !claimed && isClaimActive();
+        hasCustomAmount = customClaimAmounts[user] > 0;
+        customAmount = customClaimAmounts[user];
+        canClaim = hasCustomAmount && !claimed && isClaimActive();
     }
 
     function setPaused(bool _paused) external onlyAdmin checkNotDeleted {
