@@ -1,133 +1,113 @@
-💧 FaucetDrops
-FaucetDrops is a lightweight, user-friendly platform for crypto and blockchain communities to distribute ETH, ERC20 tokens, or stablecoins seamlessly. Built for events, hackathons, DAOs, and testnet incentives, it automates token drops with sybil-resistance, privacy, and cross-chain support. Prevent bot abuse, ensure fair distribution, and track everything in real-time.
-Powered by Self Protocol for ZK-powered identity verification, FaucetDrops makes onboarding faster and more secure—verify users in under a minute without compromising privacy.
+# 💧 FaucetDrops
 
-🌟 Why FaucetDrops?
-Manual token distribution is slow, error-prone, and vulnerable to bots. FaucetDrops fixes this with automated, verifiable drops. Key benefits:
+FaucetDrops is a lightweight, user-friendly platform for crypto and blockchain communities to distribute **ETH, ERC20 tokens, or stablecoins** seamlessly.  
+Built for **events, hackathons, DAOs, and testnet incentives**, it automates token drops with **sybil-resistance, privacy, and cross-chain support**.
 
-Gasless & Fast: Users claim tokens instantly without fees.
-Sybil-Resistant: Integrates ZK proof-of-humanity to ensure real users (no bots gaming the system).
-Customizable Types: Choose DropCode (code-based), DropList (whitelisted), or Custom (individual amounts).
-Social Verification: Require tasks like following on Twitter or joining Telegram before claims.
-Multi-Admin: Collaborate with team members to manage faucets.
-Cross-Chain: Supports Celo, Lisk, Arbitrum, Base, Ethereum, Polygon, and Optimism.
-Traceable & Secure: View transaction history, reset claims, and withdraw unclaimed funds.
-Developer-Friendly: Factory + Instance pattern for scalable smart contracts.
+Prevent bot abuse, ensure fair distribution, and track everything in real-time.  
+Powered by **Self Protocol** for **ZK-powered identity verification**, FaucetDrops makes onboarding faster and more secure—verify users in under a minute without compromising privacy.
 
-Ideal for community managers, DeFi projects, DAOs, hackathon organizers, and testnet coordinators.
+---
 
-🧩 How It Works
+## 🌟 Why FaucetDrops?
 
-Create a Faucet: Choose type (DropCode, DropList, Custom), set token/ETH, amount, whitelist, and time windows.
-Fund & Configure: Deposit tokens, add social tasks for verification, and manage admins.
-Share & Claim: Users verify tasks, enter codes (if required), and claim via connected wallet.
-Track & Manage: Monitor history, reset claims, edit names, or delete inactive faucets.
+Manual token distribution is slow, error-prone, and vulnerable to bots. FaucetDrops solves this with automated, verifiable drops.
 
+**Key Benefits:**
+- **Gasless & Fast:** Users claim tokens instantly without fees.
+- **Sybil-Resistant:** ZK proof-of-humanity to ensure real users (no bots).
+- **Customizable Types:** DropCode (code-based), DropList (whitelisted), or Custom (individual amounts).
+- **Social Verification:** Require Twitter follows, Telegram joins, etc.
+- **Multi-Admin:** Collaborate with team members to manage faucets.
+- **Cross-Chain:** Supports Celo, Lisk, Arbitrum, Base, Ethereum, Polygon, and Optimism.
+- **Traceable & Secure:** View history, reset claims, and withdraw unclaimed funds.
+- **Developer-Friendly:** Factory + Instance pattern for scalable smart contracts.
 
-✨ Features
+---
 
+## 🧩 How It Works
 
+1. **Create a Faucet:** Choose type, set token/ETH, amount, whitelist, and time windows.
+2. **Fund & Configure:** Deposit tokens, set social tasks, and add admins.
+3. **Share & Claim:** Users verify tasks, enter codes (if required), and claim.
+4. **Track & Manage:** Monitor history, reset claims, or delete inactive faucets.
 
-Feature
-Description
+---
 
+## ✨ Features
 
+| Feature | Description |
+|---------|-------------|
+| **Faucet Types** | DropCode (code-protected), DropList (whitelisted), Custom (per-user amounts). |
+| **Social Tasks** | Require Twitter/Telegram joins with username verification. |
+| **Multi-Admin** | Add/remove admins (owner/factory owner protected). |
+| **Fund/Withdraw** | Deposit ETH/tokens (3% fee); withdraw leftovers post-campaign. |
+| **Time Controls** | Set start/end times; auto-expire. |
+| **Claim Reset** | Allow repeat claims by resetting user status. |
+| **Cross-Chain Tracking** | Prevent double-claims across networks. |
+| **Transaction History** | View activity with pagination. |
+| **Analytics (Coming Soon)** | Charts for claims, engagement, and distribution metrics. |
 
-Faucet Types
-DropCode (code-protected), DropList (whitelisted), Custom (per-user amounts).
+**Supported Networks:**  
+Celo (CELO, cUSD, cEUR, $G), Lisk (LISK), Arbitrum (ETH), Base (ETH), Ethereum (ETH), Polygon (MATIC), Optimism (ETH).
 
+---
 
-Social Tasks
-Require follows/joins on Twitter, Telegram, etc., with username verification.
+## 💬 Use Cases
 
+- **Events/Hackathons:** Onboard attendees with instant tokens.
+- **Airdrops:** Fair, verifiable distributions without manual sends.
+- **Community Rewards:** Whitelist loyal members or require social tasks.
+- **Testnet Incentives:** Distribute test tokens securely to devs/testers.
+- **UBI/DAOs:** Custom payouts (e.g., $G on Celo).
 
-Multi-Admin
-Add/remove admins for collaborative management (owner/factory owner protected).
+---
 
+## 🛠 Technical Architecture
 
-Fund/Withdraw
-Deposit ETH/tokens (3% fee); withdraw leftovers post-campaign.
+**Smart Contracts:**
+- **Factory:** Deploys new faucet instances.
+- **Instances:** Handle claims (DropCode, DropList, Custom).
+- **Storage:** Tracks claims cross-chain.
 
+**Tokens:** ETH, ERC20, stablecoins via Mento.  
+**Security:** Reentrancy guards, admin controls, time-locks, audited.  
+**Integrations:** Self Protocol (ZKPoH), WalletConnect.  
+**Gas Optimization:** Batch whitelist/custom amount updates.
 
-Time Controls
-Set start/end times; auto-expire to prevent unauthorized claims.
+**Frontend:** Next.js + ethers.js (MetaMask, etc.)  
+**Backend:** Node.js for off-chain tasks (code generation, social verification).
 
+---
 
-Claim Reset
-Allow repeat claims by resetting user status.
+### Example Workflow
+1. Deploy faucet via Factory.
+2. Configure type, fund, set tasks.
+3. Users verify & claim.
+4. Admins track, withdraw, reset.
 
+---
 
-Cross-Chain Tracking
-Prevent double-claims across networks.
+## 🔒 Security & Protections
 
+- **ZK Verification:** Privacy-preserving human checks.
+- **Code/Whitelist:** Restrict claims to authorized users.
+- **Admin Safeguards:** Owner/factory owner can't be removed.
+- **Reentrancy Guards:** Prevent exploits.
+- **Time Locks:** Strict claim windows.
+- **Audited Contracts:** Secure structure for production.
 
-Transaction History
-View all activity (claims, funds, etc.) with pagination.
+---
 
+## 🔗 Stay Connected
 
-Analytics (Coming Soon)
-Charts for claims, engagement, and distribution metrics.
+- **Website:** [faucetdrops.io](https://faucetdrops.io)
+- **Twitter/X:** [@Faucetdrops](https://twitter.com/Faucetdrops)
+- **GitHub:** [github.com/FaucetDrops](https://github.com/FaucetDrops)
+- **Support:** [drops.faucet@gmail.com](mailto:drops.faucet@gmail.com)
+- **Docs:** [faucetdrops.io/docs](https://faucetdrops.io/docs)
 
+---
 
-Supported Networks: Celo (CELO, cUSD, cEUR, $G), Lisk (LISK), Arbitrum (ETH), Base (ETH), Ethereum (ETH), Polygon (MATIC), Optimism (ETH).
+## 📜 License
 
-💬 Use Cases
-
-Events/Hackathons: Onboard attendees with instant tokens for participation.
-Airdrops: Fair, verifiable distributions without manual sends.
-Community Rewards: Whitelist loyal members or require social tasks.
-Testnet Incentives: Distribute test tokens securely to developers/testers.
-UBI/DAOs: Custom amounts for targeted payouts (e.g., $G on Celo).
-
-
-🛠️ Technical Architecture
-
-Smart Contracts:
-Factory: Deploys new faucet instances.
-Instances: Handle claims by type (DropCode, DropList, Custom).
-Storage: Tracks claims cross-chain to prevent duplicates.
-
-
-Tokens: ETH, ERC20 (e.g., cUSD, cEUR, $G); stablecoins via Mento.
-Security: Reentrancy guards, admin controls, time-locks, audited.
-Integrations: Self Protocol (ZKPoH for sybil-resistance), WalletConnect.
-Gas Optimization: Batch updates for whitelists/custom amounts.
-Frontend: Next.js with ethers.js, supports MetaMask/etc.
-Backend: Node.js for off-chain tasks (e.g., code generation, social verification).
-
-Example Workflow:
-
-Deploy faucet via Factory.
-Configure type, fund, set tasks/parameters.
-Users verify, claim during window.
-Admins track/withdraw/reset.
-
-
-🔒 Security & Protections
-
-ZK Verification: Privacy-preserving human checks via Self Protocol.
-Code/Whitelist: Restrict claims to authorized users.
-Admin Safeguards: Owner/factory owner can't be removed; multi-admin optional.
-Reentrancy Guards: Prevent exploits.
-Time Locks: Strict claim windows.
-Audited Contracts: Secure structure for production use.
-
-
-
-
-🔗 Stay Connected
-
-Website: faucetdrops.io
-
-Twitter/X: [@Faucetdrops](https://x.com/faucetdrops)
-
-GitHub: [github.com/FaucetDrops](https://github.com/Priveedores-de-soluciones/Faucet_drops/)
-
-Support: [mail.](mailto:drops.faucet@gmail.com)
-
-Docs: faucetdrops.io/docs
-
-Questions? Open GitHub issue or DM us!
-
-📜 License
-MIT License. See LICENSE.
+MIT License — see [LICENSE](LICENSE) for details.
