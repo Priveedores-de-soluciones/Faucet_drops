@@ -118,9 +118,13 @@ Audited Contracts: Secure structure for production use.
 🔗 Stay Connected
 
 Website: faucetdrops.io
+
 Twitter/X: [@Faucetdrops](https://x.com/faucetdrops)
+
 GitHub: [github.com/FaucetDrops](https://github.com/Priveedores-de-soluciones/Faucet_drops/)
-Support: [mail.](drops.faucet@gmail.com)
+
+Support: [mail.](mailto:drops.faucet@gmail.com)
+
 Docs: faucetdrops.io/docs
 
 Questions? Open GitHub issue or DM us!
