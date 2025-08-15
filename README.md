@@ -45,7 +45,7 @@ Manual token distribution is slow, error-prone, and vulnerable to bots. FaucetDr
 | **Claim Reset** | Allow repeat claims by resetting user status. |
 | **Cross-Chain Tracking** | Prevent double-claims across networks. |
 | **Transaction History** | View activity with pagination. |
-| **Analytics (Coming Soon)** | Charts for claims, engagement, and distribution metrics. |
+| **Analytics** | Charts for claims, engagement, and distribution metrics. |
 
 **Supported Networks:**  
 Celo (CELO, cUSD, cEUR, $G), Lisk (LISK), Arbitrum (ETH), Base (ETH), Ethereum (ETH), Polygon (MATIC), Optimism (ETH).
