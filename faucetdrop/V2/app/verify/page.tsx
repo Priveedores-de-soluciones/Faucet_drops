@@ -4,6 +4,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { SelfQRcodeWrapper, SelfAppBuilder } from "@selfxyz/qrcode";
 import { getUniversalLink } from "@selfxyz/core";
 import { 
@@ -16,8 +17,10 @@ import {
   User, 
   Calendar, 
   MapPin,
-  Wallet
+  Wallet,
+  ArrowLeft
 } from "lucide-react";
+import LoadingPage from "@/components/loading";
 
 // Extend window object for ethereum
 declare global {
@@ -117,6 +120,7 @@ const Badge = ({ children, variant = "default", className = "" }: {
 };
 
 export default function VerificationPage() {
+  const router = useRouter();
   const [account, setAccount] = useState<string>("");
   const [selfApp, setSelfApp] = useState<any>(null);
   const [universalLink, setUniversalLink] = useState<string>("");
@@ -138,6 +142,15 @@ export default function VerificationPage() {
       initializeSelfApp();
     }
   }, [account]);
+
+  const handleBackClick = () => {
+    // Try to go back in browser history, fallback to home page
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push('/');
+    }
+  };
 
   const checkWalletConnection = async (): Promise<void> => {
     try {
@@ -206,14 +219,14 @@ export default function VerificationPage() {
     try {
       const config = {
         version: 2,
-        appName: "FauceDrop",
-        scope: "faucedrop",
+        appName: "FaucetDrops",
+        scope: "faucetdrop",
         endpoint: window.location.origin + "/api/verify",
         logoBase64: "/logo.png",
         userId: account.toLowerCase(),
         endpointType: "staging_https" as const,
         userIdType: "hex" as const,
-        userDefinedData: "FauceDrop Identity Verification",
+        userDefinedData: "FaucetDrops Identity Verification",
         disclosures: {
           minimumAge: 15,
           ofac: false,
@@ -303,14 +316,7 @@ export default function VerificationPage() {
   };
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen bg-[#020817] flex items-center justify-center">
-        <div className="flex items-center gap-2 text-gray-200">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-          <span>Loading...</span>
-        </div>
-      </div>
-    );
+    return (<LoadingPage/> );
   }
 
   if (!account) {
@@ -318,6 +324,17 @@ export default function VerificationPage() {
       <div className="min-h-screen bg-[#020817] flex items-center justify-center p-4">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
+            <div className="flex items-center justify-between mb-4">
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={handleBackClick}
+                className="text-gray-400 hover:text-gray-200"
+              >
+                <ArrowLeft className="h-4 w-4 mr-1" />
+                Back
+              </Button>
+            </div>
             <CardTitle className="flex items-center justify-center gap-2">
               <Wallet className="h-6 w-6" />
               Connect Your Wallet
@@ -357,6 +374,19 @@ export default function VerificationPage() {
   return (
     <div className="min-h-screen bg-[#020817] py-12">
       <div className="container mx-auto px-4 max-w-4xl space-y-6">
+        {/* Header with Back Button */}
+        <div className="flex items-center justify-between mb-8">
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            onClick={handleBackClick}
+            className="text-gray-400 hover:text-gray-200"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+        </div>
+
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-100 mb-2">Identity Verification</h1>

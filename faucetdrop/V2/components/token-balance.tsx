@@ -7,6 +7,7 @@ import { formatUnits, Contract, ZeroAddress, JsonRpcProvider } from "ethers"
 import { ERC20_ABI } from "@/lib/abis"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useNetwork } from "@/hooks/use-network"
+import { WalletConnectButton } from "@/components/wallet-connect"
 
 interface TokenBalanceProps {
   tokenAddress: string
@@ -37,7 +38,7 @@ export function TokenBalance({
       fetchBalance()
     } else {
       setLoading(false)
-      setError("Connect wallet")
+      setError(null) // Reset error when wallet is not connected
     }
   }, [address, tokenAddress, isNativeToken, networkChainId])
 
@@ -88,6 +89,8 @@ export function TokenBalance({
           <span className="text-sm font-medium">Balance:</span>
           {loading ? (
             <Skeleton className="h-6 w-24" />
+          ) : !address ? (
+            <WalletConnectButton className="bg-red-500 hover:bg-red-600 text-white" />
           ) : error ? (
             <span className="text-sm text-red-500">{error}</span>
           ) : (

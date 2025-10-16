@@ -1,5 +1,4 @@
 "use client"
-
 import { useEffect, useState } from "react"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import { Contract, JsonRpcProvider, isAddress } from "ethers"
@@ -7,55 +6,9 @@ import { Loader2, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useNetwork } from "@/hooks/use-network"
 import { getAllClaimsForAllNetworks } from "@/lib/faucet"
+import { DataService, UserData } from "@/lib/database-helpers"
+import { FACTORY_ABI } from "@/lib/abis"
 
-// Factory ABI for fetching factory claims
-const FACTORY_ABI = [
-  {
-    "inputs": [],
-    "name": "getAllTransactions",
-    "outputs": [
-      {
-        "components": [
-          {
-            "internalType": "address",
-            "name": "faucetAddress",
-            "type": "address"
-          },
-          {
-            "internalType": "string",
-            "name": "transactionType",
-            "type": "string"
-          },
-          {
-            "internalType": "address",
-            "name": "initiator",
-            "type": "address"
-          },
-          {
-            "internalType": "uint256",
-            "name": "amount",
-            "type": "uint256"
-          },
-          {
-            "internalType": "bool",
-            "name": "isEther",
-            "type": "bool"
-          },
-          {
-            "internalType": "uint256",
-            "name": "timestamp",
-            "type": "uint256"
-          }
-        ],
-        "internalType": "struct TransactionLibrary.Transaction[]",
-        "name": "",
-        "type": "tuple[]"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  }
-];
 
 // Cache keys for unique users data
 const UNIQUE_USERS_STORAGE_KEYS = {
@@ -63,7 +16,6 @@ const UNIQUE_USERS_STORAGE_KEYS = {
   CHART_DATA: 'users_chart_data',
   LAST_UPDATED: 'users_last_updated',
   TOTAL_USERS: 'total_unique_users',
-  
 };
 
 // Cache duration (5 minutes)
@@ -89,7 +41,6 @@ function loadFromLocalStorage<T>(key: string): T | null {
       if (!data) return null;
       
       return JSON.parse(data, (k, v) => {
-        // Convert amount back to bigint if needed
         if (k === 'amount' && typeof v === 'string' && /^\d+$/.test(v)) {
           return BigInt(v);
         }
@@ -122,7 +73,6 @@ async function getAllClaimsFromAllFactories(networks: any[]): Promise<{
   chainId: number
 }[]> {
   const allClaims: any[] = [];
-
   for (const network of networks) {
     try {
       console.log(`Fetching claims from factories on ${network.name}...`);
@@ -142,7 +92,6 @@ async function getAllClaimsFromAllFactories(networks: any[]): Promise<{
       console.error(`Error fetching claims from ${network.name}:`, error);
     }
   }
-
   allClaims.sort((a, b) => b.timestamp - a.timestamp);
   return allClaims;
 }
@@ -165,21 +114,17 @@ async function getAllClaimsFromFactories(
 }> {
   try {
     let allClaims: any[] = [];
-
     for (const factoryAddress of network.factoryAddresses) {
       if (!isAddress(factoryAddress)) {
         console.warn(`Invalid factory address ${factoryAddress} on ${network.name}, skipping`);
         continue;
       }
-
       const factoryContract = new Contract(factoryAddress, FACTORY_ABI, provider);
-
       const code = await provider.getCode(factoryAddress);
       if (code === "0x") {
         console.warn(`No contract at factory address ${factoryAddress} on ${network.name}`);
         continue;
       }
-
       try {
         console.log(`Fetching transactions from factory ${factoryAddress}...`);
         const allTransactions = await factoryContract.getAllTransactions();
@@ -194,7 +139,6 @@ async function getAllClaimsFromFactories(
         console.warn(`Error fetching transactions from factory ${factoryAddress}:`, error);
       }
     }
-
     const mappedClaims = allClaims.map((tx: any) => ({
       faucetAddress: tx.faucetAddress as string,
       transactionType: tx.transactionType as string,
@@ -203,19 +147,16 @@ async function getAllClaimsFromFactories(
       isEther: tx.isEther as boolean,
       timestamp: Number(tx.timestamp),
     }));
-
     const claimsByFaucet: Record<string, number> = {};
     mappedClaims.forEach(claim => {
       const faucetAddress = claim.faucetAddress.toLowerCase();
       claimsByFaucet[faucetAddress] = (claimsByFaucet[faucetAddress] || 0) + 1;
     });
-
     const result = {
       transactions: mappedClaims,
       totalClaims: mappedClaims.length,
       claimsByFaucet
     };
-
     console.log(`Total claims fetched from ${network.name} factories: ${result.totalClaims}`);
     return result;
   } catch (error: any) {
@@ -224,20 +165,19 @@ async function getAllClaimsFromFactories(
   }
 }
 
-interface UserData {
+interface ChartUserData {
   date: string
   newUsers: number
   cumulativeUsers: number
 }
 
 // Function to process and cache unique users data
-function processAndCacheUsersData(allClaimsUnified: any[]): {
-  chartData: UserData[]
+function processAndStoreUsersData(allClaimsUnified: any[]): {
+  chartData: ChartUserData[]
   totalUniqueUsers: number
   totalClaims: number
 } {
   console.log(`Processing ${allClaimsUnified.length} unified claims for users data...`);
-
   const uniqueClaimers = new Set<string>();
   const userFirstClaimDate: { [user: string]: string } = {};
   const newUsersByDate: { [date: string]: Set<string> } = {};
@@ -274,7 +214,7 @@ function processAndCacheUsersData(allClaimsUnified: any[]): {
   );
 
   let cumulativeUsers = 0;
-  const chartData: UserData[] = sortedDates.map(date => {
+  const chartData: ChartUserData[] = sortedDates.map(date => {
     const newUsersCount = newUsersByDate[date].size;
     cumulativeUsers += newUsersCount;
     
@@ -287,7 +227,7 @@ function processAndCacheUsersData(allClaimsUnified: any[]): {
 
   const totalUniqueUsers = uniqueClaimers.size;
 
-  // Cache all the processed data
+  // Cache in localStorage
   saveToLocalStorage(UNIQUE_USERS_STORAGE_KEYS.CHART_DATA, chartData);
   saveToLocalStorage(UNIQUE_USERS_STORAGE_KEYS.TOTAL_USERS, totalUniqueUsers);
   saveToLocalStorage("total_claim", allClaimsCount);
@@ -307,55 +247,15 @@ function processAndCacheUsersData(allClaimsUnified: any[]): {
   };
 }
 
-// Export function to get cached unique users data (for dashboard)
-export function getCachedUniqueUsersData(): {
-  totalUniqueUsers: number
-  
-  chartData: UserData[]
-  isValid: boolean
-} {
-  if (!isCacheValid()) {
-    return {
-      totalUniqueUsers: 0,
-      
-      chartData: [],
-      isValid: false
-    };
-  }
-
-  const totalUniqueUsers = loadFromLocalStorage<number>(UNIQUE_USERS_STORAGE_KEYS.TOTAL_USERS) || 0;
-  const chartData = loadFromLocalStorage<UserData[]>(UNIQUE_USERS_STORAGE_KEYS.CHART_DATA) || [];
-
-  return {
-    totalUniqueUsers,
-    chartData,
-    isValid: true
-  };
-}
-
 export function NewUsersChart() {
   const { networks } = useNetwork()
-  const [data, setData] = useState<UserData[]>([])
+  const [data, setData] = useState<ChartUserData[]>([])
   const [loading, setLoading] = useState(true)
   const [totalNewUsers, setTotalNewUsers] = useState(0)
  
-
-  const fetchData = async (forceRefresh = false) => {
+  const fetchAndStoreData = async (forceRefresh = false) => {
     setLoading(true)
     try {
-      // Check if we have valid cached data and not forcing refresh
-      if (!forceRefresh && isCacheValid()) {
-        const cachedData = getCachedUniqueUsersData();
-        if (cachedData.isValid && cachedData.chartData.length > 0) {
-          console.log('Using cached unique users data');
-          setData(cachedData.chartData);
-          setTotalNewUsers(cachedData.totalUniqueUsers);
-          
-          setLoading(false);
-          return;
-        }
-      }
-
       console.log("Fetching fresh claims data for users analysis...");
       
       // Fetch claims from storage (existing method)
@@ -365,7 +265,7 @@ export function NewUsersChart() {
       // Fetch claims from factories (new method)
       const factoryClaims = await getAllClaimsFromAllFactories(networks);
       console.log("Fetched factory claims:", factoryClaims.length);
-
+      
       // Convert all claims to unified format
       const allClaimsUnified = [
         // Storage claims
@@ -381,11 +281,18 @@ export function NewUsersChart() {
           networkName: claim.networkName,
         }))
       ];
-
       console.log(`Total unified claims: ${allClaimsUnified.length}`);
 
       // Process and cache the data
-      const { chartData, totalUniqueUsers, totalClaims: totalClaimsCount } = processAndCacheUsersData(allClaimsUnified);
+      const { chartData, totalUniqueUsers, totalClaims: totalClaimsCount } = processAndStoreUsersData(allClaimsUnified);
+      
+      // Save to Supabase
+      const supabaseData: Omit<UserData, 'id' | 'updated_at'>[] = chartData.map(item => ({
+        date: item.date,
+        new_users: item.newUsers,
+        cumulative_users: item.cumulativeUsers
+      }));
+      await DataService.saveUserData(supabaseData);
 
       console.log("Users analysis complete:", {
         totalClaims: totalClaimsCount,
@@ -395,44 +302,76 @@ export function NewUsersChart() {
       
       setData(chartData);
       setTotalNewUsers(totalUniqueUsers);
-     
-
+      
+      console.log('User data saved to both localStorage and Supabase');
     } catch (error) {
       console.error("Error fetching claimer data:", error);
-      
-      // Try to load cached data as fallback
-      const cachedData = getCachedUniqueUsersData();
-      if (cachedData.chartData.length > 0) {
-        console.log('Using cached data as fallback');
-        setData(cachedData.chartData);
-        setTotalNewUsers(cachedData.totalUniqueUsers);
-        
-      }
     } finally {
       setLoading(false);
     }
   };
 
-  // Load cached data immediately on mount
-  useEffect(() => {
-    const cachedData = getCachedUniqueUsersData();
-    if (cachedData.isValid && cachedData.chartData.length > 0) {
-      console.log('Loading cached users data on mount');
-      setData(cachedData.chartData);
-      setTotalNewUsers(cachedData.totalUniqueUsers);
-      
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (networks.length > 0) {
-      // Only fetch if we don't have valid cached data
-      const cachedData = getCachedUniqueUsersData();
-      if (!cachedData.isValid || cachedData.chartData.length === 0) {
-        fetchData();
+  const loadStoredData = async () => {
+    // Try localStorage first
+    if (isCacheValid()) {
+      const cachedData = loadFromLocalStorage<ChartUserData[]>(UNIQUE_USERS_STORAGE_KEYS.CHART_DATA);
+      const cachedTotal = loadFromLocalStorage<number>(UNIQUE_USERS_STORAGE_KEYS.TOTAL_USERS);
+      if (cachedData && cachedTotal && cachedData.length > 0) {
+        console.log('Using cached users data from localStorage');
+        setData(cachedData);
+        setTotalNewUsers(cachedTotal);
+        setLoading(false);
+        return true;
       }
     }
+
+    // Fallback to Supabase
+    try {
+      const supabaseData = await DataService.loadUserData();
+      if (supabaseData.length > 0 && DataService.isDataFresh(supabaseData[0].updated_at)) {
+        console.log('Using fresh user data from Supabase');
+        const chartData = supabaseData.map(item => ({
+          date: item.date,
+          newUsers: item.new_users,
+          cumulativeUsers: item.cumulative_users
+        }));
+        const totalUsers = Math.max(...chartData.map(d => d.cumulativeUsers));
+        
+        setData(chartData);
+        setTotalNewUsers(totalUsers);
+        
+        // Cache in localStorage
+        saveToLocalStorage(UNIQUE_USERS_STORAGE_KEYS.CHART_DATA, chartData);
+        saveToLocalStorage(UNIQUE_USERS_STORAGE_KEYS.TOTAL_USERS, totalUsers);
+        saveToLocalStorage(UNIQUE_USERS_STORAGE_KEYS.LAST_UPDATED, Date.now());
+        
+        setLoading(false);
+        return true;
+      }
+    } catch (error) {
+      console.error('Error loading user data from Supabase:', error);
+    }
+
+    return false;
+  };
+
+  useEffect(() => {
+    loadStoredData().then((dataLoaded) => {
+      if (!dataLoaded && networks.length > 0) {
+        fetchAndStoreData();
+      }
+    });
+  }, [networks]);
+
+  // Auto-refresh data every 5 minutes
+  useEffect(() => {
+    if (networks.length === 0) return;
+    
+    const interval = setInterval(() => {
+      fetchAndStoreData();
+    }, CACHE_DURATION);
+
+    return () => clearInterval(interval);
   }, [networks]);
 
   if (loading && data.length === 0) {
@@ -471,12 +410,11 @@ export function NewUsersChart() {
             <p className="text-sm text-muted-foreground">Unique Users</p>
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={() => fetchData(true)} disabled={loading}>
+        <Button variant="outline" size="sm" onClick={() => fetchAndStoreData(true)} disabled={loading}>
           <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
       </div>
-
       {data.length > 0 ? (
         <ResponsiveContainer width="100%" height={300}>
           <BarChart data={data}>

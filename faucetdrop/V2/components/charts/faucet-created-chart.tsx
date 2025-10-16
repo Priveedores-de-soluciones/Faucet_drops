@@ -1,10 +1,10 @@
 "use client"
-
 import { useEffect, useState } from "react"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts"
 import { useNetwork } from "@/hooks/use-network"
 import { getFaucetsForNetwork } from "@/lib/faucet"
 import { Loader2 } from "lucide-react"
+import { DataService, FaucetData } from "@/lib/database-helpers"
 
 // Cache keys for faucet data
 const FAUCET_STORAGE_KEYS = {
@@ -56,24 +56,12 @@ export function FaucetsCreatedChart() {
   const [loading, setLoading] = useState(true)
   const [totalFaucets, setTotalFaucets] = useState(0)
 
-  const fetchFaucetData = async () => {
+  const fetchAndStoreFaucetData = async () => {
     setLoading(true)
     try {
-      // Check if we have valid cached data
-      if (isCacheValid()) {
-        const cachedData = loadFromLocalStorage<ChartData[]>(FAUCET_STORAGE_KEYS.CHART_DATA);
-        const cachedTotal = loadFromLocalStorage<number>(FAUCET_STORAGE_KEYS.TOTAL_FAUCETS);
-        if (cachedData && cachedTotal !== null) {
-          console.log('Using cached faucet data');
-          setData(cachedData);
-          setTotalFaucets(cachedTotal);
-          setLoading(false);
-          return;
-        }
-      }
-
+      console.log('Fetching fresh faucet data...')
+      
       const chartData: ChartData[] = []
-
       await Promise.all(
         networks.map(async (network) => {
           try {
@@ -96,48 +84,90 @@ export function FaucetsCreatedChart() {
 
       const total = chartData.reduce((sum, item) => sum + item.faucets, 0)
       
-      // Cache the data
+      // Save to localStorage
       saveToLocalStorage(FAUCET_STORAGE_KEYS.CHART_DATA, chartData)
       saveToLocalStorage(FAUCET_STORAGE_KEYS.TOTAL_FAUCETS, total)
       saveToLocalStorage(FAUCET_STORAGE_KEYS.LAST_UPDATED, Date.now())
 
+      // Save to Supabase
+      const supabaseData: Omit<FaucetData, 'id' | 'updated_at'>[] = chartData.map(item => ({
+        network: item.network,
+        faucets: item.faucets
+      }))
+      await DataService.saveFaucetData(supabaseData)
+
       setData(chartData)
       setTotalFaucets(total)
+      
+      console.log('Faucet data saved to both localStorage and Supabase')
     } catch (error) {
       console.error("Error fetching faucet data:", error)
-      // Fallback to cached data if available
-      const cachedData = loadFromLocalStorage<ChartData[]>(FAUCET_STORAGE_KEYS.CHART_DATA);
-      const cachedTotal = loadFromLocalStorage<number>(FAUCET_STORAGE_KEYS.TOTAL_FAUCETS);
-      if (cachedData && cachedTotal !== null) {
-        console.log('Using cached faucet data as fallback');
-        setData(cachedData);
-        setTotalFaucets(cachedTotal);
-      }
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => {
-    // Load cached data immediately on mount
-    const cachedData = loadFromLocalStorage<ChartData[]>(FAUCET_STORAGE_KEYS.CHART_DATA);
-    const cachedTotal = loadFromLocalStorage<number>(FAUCET_STORAGE_KEYS.TOTAL_FAUCETS);
-    if (cachedData && cachedTotal !== null && isCacheValid()) {
-      console.log('Loading cached faucet data on mount');
-      setData(cachedData);
-      setTotalFaucets(cachedTotal);
-      setLoading(false);
-    }
-  }, [])
-
-  useEffect(() => {
-    if (networks.length > 0) {
-      // Only fetch if we don't have valid cached data
-      if (!isCacheValid()) {
-        fetchFaucetData()
+  const loadStoredData = async () => {
+    // Try localStorage first
+    if (isCacheValid()) {
+      const cachedData = loadFromLocalStorage<ChartData[]>(FAUCET_STORAGE_KEYS.CHART_DATA);
+      const cachedTotal = loadFromLocalStorage<number>(FAUCET_STORAGE_KEYS.TOTAL_FAUCETS);
+      if (cachedData && cachedTotal !== null) {
+        console.log('Using cached faucet data from localStorage');
+        setData(cachedData);
+        setTotalFaucets(cachedTotal);
+        setLoading(false);
+        return true;
       }
     }
+
+    // Fallback to Supabase
+    try {
+      const supabaseData = await DataService.loadFaucetData();
+      if (supabaseData.length > 0 && DataService.isDataFresh(supabaseData[0].updated_at)) {
+        console.log('Using fresh faucet data from Supabase');
+        const chartData = supabaseData.map(item => ({
+          network: item.network,
+          faucets: item.faucets
+        }));
+        const total = chartData.reduce((sum, item) => sum + item.faucets, 0);
+        
+        setData(chartData);
+        setTotalFaucets(total);
+        
+        // Cache in localStorage
+        saveToLocalStorage(FAUCET_STORAGE_KEYS.CHART_DATA, chartData);
+        saveToLocalStorage(FAUCET_STORAGE_KEYS.TOTAL_FAUCETS, total);
+        saveToLocalStorage(FAUCET_STORAGE_KEYS.LAST_UPDATED, Date.now());
+        
+        setLoading(false);
+        return true;
+      }
+    } catch (error) {
+      console.error('Error loading data from Supabase:', error);
+    }
+
+    return false;
+  }
+
+  useEffect(() => {
+    loadStoredData().then((dataLoaded) => {
+      if (!dataLoaded && networks.length > 0) {
+        fetchAndStoreFaucetData();
+      }
+    });
   }, [networks])
+
+  // Auto-refresh data every 5 minutes
+  useEffect(() => {
+    if (networks.length === 0) return;
+    
+    const interval = setInterval(() => {
+      fetchAndStoreFaucetData();
+    }, CACHE_DURATION);
+
+    return () => clearInterval(interval);
+  }, [networks]);
 
   if (loading) {
     return (
@@ -153,7 +183,6 @@ export function FaucetsCreatedChart() {
         <p className="text-2xl font-bold">{totalFaucets}</p>
         <p className="text-sm text-muted-foreground">Total Faucets Created</p>
       </div>
-
       <ResponsiveContainer width="100%" height={300}>
         <BarChart data={data}>
           <CartesianGrid strokeDasharray="3 3" />

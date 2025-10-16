@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useWallet } from "@/hooks/use-wallet";
 import { useNetwork } from "@/hooks/use-network";
 import { useToast } from "@/hooks/use-toast";
+import LoadingPage from "@/components/loading";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -165,7 +166,7 @@ function TokenBalance({
         if (isNativeToken) {
           balance = await provider.getBalance(address);
         } else if (tokenAddress === ZeroAddress) {
-          balance = 0n;
+          balance = BigInt(0);
         } else {
           const tokenContract = new Contract(tokenAddress, ERC20_ABI, provider);
           balance = await tokenContract.balanceOf(address);
@@ -469,6 +470,7 @@ export default function NetworkFaucets() {
   const { goBack } = usePreviousPage();
   const [faucets, setFaucets] = useState<FaucetData[]>([]);
   const [loadingFaucets, setLoadingFaucets] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [switchingNetwork, setSwitchingNetwork] = useState(false);
   const { width, height } = useWindowSize();
@@ -576,23 +578,23 @@ export default function NetworkFaucets() {
           return bNameDesc.localeCompare(aNameDesc);
 
         case SORT_OPTIONS.BALANCE_HIGH:
-          const aBalance = Number(formatUnits(a.balance || 0n, a.tokenDecimals || 18));
-          const bBalance = Number(formatUnits(b.balance || 0n, b.tokenDecimals || 18));
+          const aBalance = Number(formatUnits(a.balance || BigInt(0), a.tokenDecimals || 18));
+          const bBalance = Number(formatUnits(b.balance || BigInt(0), b.tokenDecimals || 18));
           return bBalance - aBalance;
 
         case SORT_OPTIONS.BALANCE_LOW:
-          const aBalanceLow = Number(formatUnits(a.balance || 0n, a.tokenDecimals || 18));
-          const bBalanceLow = Number(formatUnits(b.balance || 0n, b.tokenDecimals || 18));
+          const aBalanceLow = Number(formatUnits(a.balance || BigInt(0), a.tokenDecimals || 18));
+          const bBalanceLow = Number(formatUnits(b.balance || BigInt(0), b.tokenDecimals || 18));
           return aBalanceLow - bBalanceLow;
 
         case SORT_OPTIONS.AMOUNT_HIGH:
-          const aAmount = Number(formatUnits(a.claimAmount || 0n, a.tokenDecimals || 18));
-          const bAmount = Number(formatUnits(b.claimAmount || 0n, b.tokenDecimals || 18));
+          const aAmount = Number(formatUnits(a.claimAmount || BigInt(0), a.tokenDecimals || 18));
+          const bAmount = Number(formatUnits(b.claimAmount || BigInt(0), b.tokenDecimals || 18));
           return bAmount - aAmount;
 
         case SORT_OPTIONS.AMOUNT_LOW:
-          const aAmountLow = Number(formatUnits(a.claimAmount || 0n, a.tokenDecimals || 18));
-          const bAmountLow = Number(formatUnits(b.claimAmount || 0n, b.tokenDecimals || 18));
+          const aAmountLow = Number(formatUnits(a.claimAmount || BigInt(0), a.tokenDecimals || 18));
+          const bAmountLow = Number(formatUnits(b.claimAmount || BigInt(0), b.tokenDecimals || 18));
           return aAmountLow - bAmountLow;
 
         default:
@@ -608,6 +610,7 @@ export default function NetworkFaucets() {
     if (!network || isNaN(chainId)) {
       console.log("Skipping loadFaucets: network undefined or invalid chainId", { chainId, network });
       setLoadingFaucets(false);
+      setInitialLoading(false);
       return;
     }
 
@@ -652,12 +655,14 @@ export default function NetworkFaucets() {
       setFaucets([]); // Clear faucets on error
     } finally {
       setLoadingFaucets(false);
+      setInitialLoading(false);
     }
   }, [network, chainId, toast]);
 
   useEffect(() => {
     if (isNaN(chainId) || !network) {
       console.log("❌ Invalid chainId or network not found", { chainId, network, chainIdStr });
+      setInitialLoading(false);
       toast({
         title: "Network Not Found",
         description: `Network with chain ID ${chainIdStr || "unknown"} is not supported`,
@@ -763,6 +768,11 @@ export default function NetworkFaucets() {
     return buttons;
   };
 
+  // ✅ UPDATED: Show LoadingPage during initial load
+  if (initialLoading) {
+    return <LoadingPage />;
+  }
+
   return (
     <div className="container mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6 md:py-8 space-y-4 sm:space-y-6">
       {/* Header with Back Button */}
@@ -797,7 +807,8 @@ export default function NetworkFaucets() {
         hasActiveFilters={hasActiveFilters}
       />
 
-      {loadingFaucets ? (
+      {/* ✅ UPDATED: Show loading state only for content loading, not initial page load */}
+      {loadingFaucets && !initialLoading ? (
         <div className="flex justify-center items-center py-8 sm:py-10 md:py-12">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 sm:h-10 sm:w-10 md:h-12 md:w-12 border-b-2 border-primary mx-auto"></div>

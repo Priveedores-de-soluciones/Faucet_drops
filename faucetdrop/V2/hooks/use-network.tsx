@@ -1,17 +1,20 @@
-// Fixed NetworkContext with proper configurations
 "use client"
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react"
 import { ZeroAddress } from "ethers"
 import { useToast } from "@/hooks/use-toast"
+import { useWallet } from "@/hooks/use-wallet"
 
 export interface Network {
   name: string
+  symbol: string
   chainId: number
   rpcUrl: string
   blockExplorerUrls: string
   explorerUrl?: string
   color: string
+  logoUrl: string
+  iconUrl?: string
   factoryAddresses: string[]
   factories: {
     dropcode?: string
@@ -28,20 +31,25 @@ export interface Network {
 }
 
 const networks: Network[] = [
-  // Mainnet Networks
   {
     name: "Celo",
+    symbol: "CELO",
     chainId: 42220,
     rpcUrl: "https://forno.celo.org",
     blockExplorerUrls: "https://celoscan.io",
     color: "#35D07F",
+    logoUrl: "/celo.png",
+    iconUrl: "/celo.png",
     factoryAddresses: [
       "0x17cFed7fEce35a9A71D60Fbb5CA52237103A21FB",
+      "0xB8De8f37B263324C44FD4874a7FB7A0C59D8C58E",
+      "0xc26c4Ea50fd3b63B6564A5963fdE4a3A474d4024",
       "0x9D6f441b31FBa22700bb3217229eb89b13FB49de",
       "0xE3Ac30fa32E727386a147Fe08b4899Da4115202f",
       "0xF8707b53a2bEc818E96471DDdb34a09F28E0dE6D",
       "0x8D1306b3970278b3AB64D1CE75377BDdf00f61da",
-      "0x8cA5975Ded3B2f93E188c05dD6eb16d89b14aeA5"
+      "0x8cA5975Ded3B2f93E188c05dD6eb16d89b14aeA5",
+      "0xc9c89f695C7fa9D9AbA3B297C9b0d86C5A74f534"
     ],
     factories: {
       droplist: "0xF8707b53a2bEc818E96471DDdb34a09F28E0dE6D",
@@ -58,11 +66,14 @@ const networks: Network[] = [
   },
   {
     name: "Lisk",
+    symbol: "LSK",
     chainId: 1135,
     rpcUrl: "https://rpc.api.lisk.com",
     blockExplorerUrls: "https://blockscout.lisk.com",
     explorerUrl: "https://blockscout.lisk.com",
     color: "#0D4477",
+    logoUrl: "/lsk.png",
+    iconUrl: "/lsk.png",
     factoryAddresses: [
       "0x96E9911df17e94F7048cCbF7eccc8D9b5eDeCb5C",
       "0x4F5Cf906b9b2Bf4245dba9F7d2d7F086a2a441C2",
@@ -77,23 +88,26 @@ const networks: Network[] = [
     },
     tokenAddress: ZeroAddress,
     nativeCurrency: {
-      name: "Lisk",
-      symbol: "LISK",
+      name: "Ether",
+      symbol: "ETH",
       decimals: 18,
     },
     isTestnet: false,
   },
   {
     name: "Arbitrum",
+    symbol: "ARB",
     chainId: 42161,
     rpcUrl: "https://arb1.arbitrum.io/rpc",
     blockExplorerUrls: "https://arbiscan.io",
     explorerUrl: "https://arbiscan.io",
     color: "#28A0F0",
-    factoryAddresses: ["0x0a5C19B5c0f4B9260f0F8966d26bC05AAea2009C",
+    logoUrl: "/arb.jpeg",
+    iconUrl: "/arb.jpeg",
+    factoryAddresses: [
+      "0x0a5C19B5c0f4B9260f0F8966d26bC05AAea2009C",
       "0x42355492298A89eb1EF7FB2fFE4555D979f1Eee9",
       "0x9D6f441b31FBa22700bb3217229eb89b13FB49de"
-
     ],
     factories: {
       droplist: "0x0a5C19B5c0f4B9260f0F8966d26bC05AAea2009C",
@@ -102,142 +116,42 @@ const networks: Network[] = [
     },
     tokenAddress: ZeroAddress,
     nativeCurrency: {
-      name: "Ethereum",
+      name: "Ether",
       symbol: "ETH",
       decimals: 18,
     },
     isTestnet: false,
   },
-{
-  name: "Base",
-  chainId: 8453,
-  rpcUrl: "https://base.publicnode.com", 
-  blockExplorerUrls: "https://basescan.org",
-  explorerUrl: "https://basescan.org",
-  color: "#0052FF",
-  factoryAddresses: [
-    "0x945431302922b69D500671201CEE62900624C6d5",
-    "0xda191fb5Ca50fC95226f7FC91C792927FC968CA9",
-    "0x587b840140321DD8002111282748acAdaa8fA206"
-  ],
-  factories: {
-    droplist: "0x945431302922b69D500671201CEE62900624C6d5",
-    dropcode: "0xda191fb5Ca50fC95226f7FC91C792927FC968CA9",
-    custom: "0x587b840140321DD8002111282748acAdaa8fA206"
-  },
-  tokenAddress: ZeroAddress,
-  nativeCurrency: {
-    name: "Ethereum",
-    symbol: "ETH",
-    decimals: 18,
-  },
-  isTestnet: false,
-}
-  
-  // // Testnet Networks
-  // {
-  //   name: "Celo Alfajores",
-  //   chainId: 44787,
-  //   rpcUrl: "https://alfajores-forno.celo-testnet.org",
-  //   blockExplorerUrls: "https://alfajores.celoscan.io",
-  //   explorerUrl: "https://alfajores.celoscan.io",
-  //   color: "#5FE3A1",
-  //   factoryAddresses: [
-  //     "0x1234567890123456789012345678901234567890", // Example testnet addresses
-  //     "0x2345678901234567890123456789012345678901",
-  //     "0x3456789012345678901234567890123456789012"
-  //   ],
-  //   factories: {
-  //     droplist: "0x7614f4C71776B2944445138be09FA160BcE3F790",
-  //     dropcode: "0xF84614D384D01Aa13fe79aD5375CcED57504b586",
-  //     custom: "0xd9DBAC257e532ec690dca42265A93c811Eed835f"
-  //   },
-  //   tokenAddress: ZeroAddress,
-  //   nativeCurrency: {
-  //     name: "Celo",
-  //     symbol: "CELO",
-  //     decimals: 18,
-  //   },
-  //   isTestnet: true,
-  // },
-  // {
-  //   name: "Lisk Sepolia",
-  //   chainId: 4202,
-  //   rpcUrl: "https://rpc.sepolia-api.lisk.com",
-  //   blockExplorerUrls: "https://sepolia-blockscout.lisk.com",
-  //   explorerUrl: "https://sepolia-blockscout.lisk.com",
-  //   color: "#2B5E99",
-  //   factoryAddresses: [
-  //     "0x52D38daee8458E89C2c997ad16B2b3e61A2E090a",
-  //     "0xF8AFd6372aAF40A0694aAaf2848f6311b4f5D958",
-  //     "0xDfF67DCc75fACC05E5856BE695ebcc3A9D0Ec2d9"
-  //   ],
-  //   factories: {
-  //     droplist: "0x52D38daee8458E89C2c997ad16B2b3e61A2E090a",
-  //     dropcode: "0xF8AFd6372aAF40A0694aAaf2848f6311b4f5D958",
-  //     custom: "0xDfF67DCc75fACC05E5856BE695ebcc3A9D0Ec2d9"
-  //   },
-  //   tokenAddress: ZeroAddress,
-  //   nativeCurrency: {
-  //     name: "Lisk",
-  //     symbol: "LSK",
-  //     decimals: 18,
-  //   },
-  //   isTestnet: true,
-  // },
-  // {
-  //   name: "Arbitrum Sepolia",
-  //   chainId: 421614,
-  //   rpcUrl: "https://sepolia-rollup.arbitrum.io/rpc",
-  //   blockExplorerUrls: "https://sepolia.arbiscan.io",
-  //   explorerUrl: "https://sepolia.arbiscan.io",
-  //   color: "#5CBFFF",
-  //   factoryAddresses: [
-  //     "0x17B3d9499a56E9d6f143CB9A8Bec3A99A0C33264",
-  //     "0xd041701cC67944fEdc311d7f1825A52b93C4aBF1",
-  //     "0xcF97e3E1A25876a15be55F2576f4697A55A67DFC"
-  //   ],
-  //   factories: {
-  //     droplist: "0x17B3d9499a56E9d6f143CB9A8Bec3A99A0C33264",
-  //     dropcode: "0xd041701cC67944fEdc311d7f1825A52b93C4aBF1",
-  //     custom: "0xcF97e3E1A25876a15be55F2576f4697A55A67DFC"
-  //   },
-  //   tokenAddress: ZeroAddress,
-  //   nativeCurrency: {
-  //     name: "Ethereum",
-  //     symbol: "ETH",
-  //     decimals: 18,
-  //   },
-  //   isTestnet: true,
-  // },
-  // {
-  //   name: "Base Sepolia",
-  //   chainId: 84532,
-  //   rpcUrl: "https://sepolia.base.org",
-  //   blockExplorerUrls: "https://sepolia.basescan.org",
-  //   explorerUrl: "https://sepolia.basescan.org",
-  //   color: "#4F8AFF",
-  //   factoryAddresses: [
-  //     "0x3A4B3D060136462dD57d74792Af10e0669CF47a7",
-  //     "0xe60cbc95c882b16DC23C9E6A17eb7bb52344a0E1",
-  //     "0x9595D20040dB9E8DF4d1510e967455295EC723a8"
-  //   ],
-  //   factories: {
-  //     droplist: "0xe60cbc95c882b16DC23C9E6A17eb7bb52344a0E1",
-  //     dropcode: "0x9595D20040dB9E8DF4d1510e967455295EC723a8",
-  //     custom: "0x3A4B3D060136462dD57d74792Af10e0669CF47a7"
-  //   },
-  //   tokenAddress: ZeroAddress,
-  //   nativeCurrency: {
-  //     name: "Ethereum",
-  //     symbol: "ETH",
-  //     decimals: 18,
-  //   },
-  //   isTestnet: true,
-  // },
-];
+  {
+    name: "Base",
+    symbol: "BASE",
+    chainId: 8453,
+    rpcUrl: "https://base-mainnet.g.alchemy.com/v2/sXHCrL5-xwYkPtkRC_WTEZHvIkOVTbw-",
+    blockExplorerUrls: "https://basescan.org",
+    explorerUrl: "https://basescan.org",
+    color: "#0052FF",
+    logoUrl: "/base.png",
+    iconUrl: "/base.png",
+    factoryAddresses: [
+      "0x945431302922b69D500671201CEE62900624C6d5",
+      "0xda191fb5Ca50fC95226f7FC91C792927FC968CA9",
+      "0x587b840140321DD8002111282748acAdaa8fA206"
+    ],
+    factories: {
+      droplist: "0x945431302922b69D500671201CEE62900624C6d5",
+      dropcode: "0xda191fb5Ca50fC95226f7FC91C792927FC968CA9",
+      custom: "0x587b840140321DD8002111282748acAdaa8fA206"
+    },
+    tokenAddress: ZeroAddress,
+    nativeCurrency: {
+      name: "Ether",
+      symbol: "ETH",
+      decimals: 18,
+    },
+    isTestnet: false,
+  }
+]
 
-// Rest of the NetworkContext implementation remains the same...
 interface NetworkContextType {
   network: Network | null
   networks: Network[]
@@ -247,6 +161,7 @@ interface NetworkContextType {
   getFactoryAddress: (factoryType: 'dropcode' | 'droplist' | 'custom', network?: Network) => string | null
   isSwitchingNetwork: boolean
   currentChainId: number | null
+  isConnecting: boolean // NEW: Track connection state
 }
 
 const NetworkContext = createContext<NetworkContextType>({
@@ -258,13 +173,84 @@ const NetworkContext = createContext<NetworkContextType>({
   getFactoryAddress: () => null,
   isSwitchingNetwork: false,
   currentChainId: null,
+  isConnecting: false, // NEW
 })
 
 export function NetworkProvider({ children }: { children: ReactNode }) {
   const { toast } = useToast()
-  const [network, setNetwork] = useState<Network | null>(null)
-  const [currentChainId, setCurrentChainId] = useState<number | null>(null)
+  const [network, setNetworkState] = useState<Network | null>(null)
   const [isSwitchingNetwork, setIsSwitchingNetwork] = useState(false)
+  const [isConnecting, setIsConnecting] = useState(false) // NEW: Track connection state
+  
+  const { chainId, address, switchChain } = useWallet()
+  const currentChainId = chainId
+  
+  // Use ref to always have fresh values - update synchronously on every render
+  const walletRef = useRef({ address, chainId, switchChain })
+  // Update ref synchronously (not in useEffect) to ensure it's always current
+  walletRef.current = { address, chainId, switchChain }
+
+  // Debug: Log network state changes
+  useEffect(() => {
+    console.log(`[NetworkProvider] State:`, {
+      networkName: network?.name,
+      networkChainId: network?.chainId,
+      currentChainId,
+      address,
+      hasAddress: !!address,
+      isSwitchingNetwork,
+      isConnecting, // NEW
+      walletRef: walletRef.current
+    })
+  }, [network, currentChainId, address, isSwitchingNetwork, isConnecting])
+
+  // FIXED: Separate effect for connection state (runs when address changes, before chainId)
+  useEffect(() => {
+    console.log(`[NetworkProvider] Connection effect:`, { chainId, address })
+    if (address && !chainId) {
+      console.log(`[NetworkProvider] ⏳ Wallet connecting... (address ready, awaiting chainId)`)
+      setIsConnecting(true)
+      setNetworkState(null) // NEW: Reset during connect to avoid stale network
+    } else if (!address) {
+      console.log(`[NetworkProvider] ❌ No wallet connected`)
+      setIsConnecting(false)
+      setNetworkState(null)
+    }
+  }, [address]) // FIXED: Depend only on address for connection detection
+
+  // FIXED: Dedicated effect for chainId updates (triggers network set/reset)
+  useEffect(() => {
+    console.log(`[NetworkProvider] chainId effect:`, { chainId, hasAddress: !!address, isConnecting })
+    
+    if (!chainId) return // FIXED: Skip if no chainId (let connection effect handle)
+    
+    setIsConnecting(false) // NEW: Clear connecting state
+    
+    const currentNetwork = networks.find((n) => n.chainId === chainId)
+    if (currentNetwork) {
+      console.log(`[NetworkProvider] ✅ Setting network: ${currentNetwork.name}`)
+      setNetworkState(currentNetwork)
+      toast({ // NEW: Success toast on valid network
+        title: "Network Detected",
+        description: `Connected to ${currentNetwork.name}`,
+      })
+    } else {
+      console.log(`[NetworkProvider] ⚠️ Unsupported chainId: ${chainId}`)
+      setNetworkState(null)
+      toast({
+        title: "Unsupported Network",
+        description: `Chain ID ${chainId} is not supported. Please switch to Celo, Lisk, Arbitrum, or Base.`,
+        variant: "destructive",
+        action: { // NEW: Add switch prompt
+          label: "Switch Networks",
+          onClick: () => {
+            // Trigger selector open or default switch (customize as needed)
+            window.location.href = '/'; // Or open a modal with selector
+          },
+        },
+      })
+    }
+  }, [chainId]) // FIXED: Depend only on chainId for network setting
 
   const getLatestFactoryAddress = (targetNetwork?: Network) => {
     const selectedNetwork = targetNetwork || network
@@ -274,171 +260,94 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
   const getFactoryAddress = (factoryType: 'dropcode' | 'droplist' | 'custom', targetNetwork?: Network) => {
     const selectedNetwork = targetNetwork || network
     if (!selectedNetwork) return null
-    
     return selectedNetwork.factories[factoryType] || null
   }
 
-  // Rest of implementation stays the same...
-  useEffect(() => {
-    const detectCurrentChain = async () => {
-      if (typeof window === "undefined" || !window.ethereum) return
-
-      try {
-        const chainIdHex = await window.ethereum.request({ method: "eth_chainId" })
-        const chainId = Number.parseInt(chainIdHex, 16)
-        setCurrentChainId(chainId)
-        
-        // Auto-set network if it matches
-        const currentNetwork = networks.find((n) => n.chainId === chainId)
-        if (currentNetwork && !network) {
-          setNetwork(currentNetwork)
-        }
-      } catch (error) {
-        console.error("Error detecting chain:", error)
-      }
-    }
-
-    detectCurrentChain()
-
-    if (window.ethereum) {
-      const handleChainChanged = (chainIdHex: string) => {
-        try {
-          const chainId = Number.parseInt(chainIdHex, 16)
-          console.log(`Chain changed to: ${chainId}`)
-          setCurrentChainId(chainId)
-
-          const currentNetwork = networks.find((n) => n.chainId === chainId)
-          if (currentNetwork) {
-            setNetwork(currentNetwork)
-            toast({
-              title: "Network Changed",
-              description: `Switched to ${currentNetwork.name}`,
-              variant: "default",
-            })
-          } else {
-            setNetwork(null)
-            toast({
-              title: "Unsupported Network",
-              description: `Chain ID ${chainId} is not supported. Please switch to a supported network.`,
-              variant: "destructive",
-            })
-          }
-        } catch (error) {
-          console.error("Error handling chain change:", error)
-        }
-      }
-
-      window.ethereum.on("chainChanged", handleChainChanged)
-
-      return () => {
-        if (window.ethereum && window.ethereum.removeListener) {
-          window.ethereum.removeListener("chainChanged", handleChainChanged)
-        }
-      }
-    }
-  }, [network, toast])
-
-  const switchNetwork = async (chainId: number) => {
-    if (typeof window === "undefined" || !window.ethereum) {
+  const switchNetwork = useCallback(async (targetChainId: number) => {
+    // Get fresh values from ref
+    const { address: currentAddress, chainId: currentChainId, switchChain: currentSwitchChain } = walletRef.current
+    
+    console.log(`[switchNetwork] Called with:`, {
+      targetChainId,
+      currentAddress,
+      currentChainId,
+      hasAddress: !!currentAddress,
+      refValues: walletRef.current
+    })
+    
+    if (!currentAddress) {
+      console.log(`[switchNetwork] ❌ No wallet connected`)
       toast({
-        title: "No Ethereum Provider",
-        description: "Please install MetaMask or another wallet provider",
+        title: "No Wallet Connected",
+        description: "Please connect your wallet first",
         variant: "destructive",
       })
       return
     }
 
     if (isSwitchingNetwork) {
-      console.log("Network switch already in progress, skipping")
+      console.log(`[switchNetwork] ⏳ Already switching, ignoring`)
       return
     }
 
-    const targetNetwork = networks.find((n) => n.chainId === chainId)
+    const targetNetwork = networks.find((n) => n.chainId === targetChainId)
     if (!targetNetwork) {
+      console.log(`[switchNetwork] ❌ Network not found: ${targetChainId}`)
       toast({
         title: "Network Not Supported",
-        description: `Chain ID ${chainId} is not supported`,
+        description: `Chain ID ${targetChainId} is not supported`,
         variant: "destructive",
       })
       return
     }
 
+    // Already on target network
+    if (currentChainId === targetChainId) {
+      console.log(`[switchNetwork] ✅ Already on ${targetNetwork.name}`)
+      return
+    }
+
     try {
       setIsSwitchingNetwork(true)
-      console.log(`Attempting to switch to network ${targetNetwork.name} (${chainId})`)
+      console.log(`[switchNetwork] ⏳ Switching to ${targetNetwork.name}...`)
 
-      await window.ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: `0x${chainId.toString(16)}` }],
-      })
+      // Let the wallet switch and the useEffect will update the UI
+      await currentSwitchChain(targetChainId)
+      console.log(`[switchNetwork] ✅ Switch completed`)
 
-      console.log(`Successfully switched to ${targetNetwork.name}`)
-      setNetwork(targetNetwork)
-      setCurrentChainId(chainId)
-      toast({
-        title: "Network Switched",
-        description: `Successfully switched to ${targetNetwork.name}`,
-        variant: "default",
-      })
-    } catch (error: any) {
-      console.warn(`Error switching to ${targetNetwork.name}:`, error)
-
-      if (error.code === 4902) {
-        try {
-          console.log(`Adding network ${targetNetwork.name} to wallet`)
-
-          await window.ethereum.request({
-            method: "wallet_addEthereumChain",
-            params: [
-              {
-                chainId: `0x${chainId.toString(16)}`,
-                chainName: targetNetwork.name,
-                nativeCurrency: targetNetwork.nativeCurrency,
-                rpcUrls: [targetNetwork.rpcUrl],
-                blockExplorerUrls: [targetNetwork.blockExplorerUrls],
-              },
-            ],
-          })
-
-          console.log(`Successfully added network ${targetNetwork.name}`)
-
-          await window.ethereum.request({
-            method: "wallet_switchEthereumChain",
-            params: [{ chainId: `0x${chainId.toString(16)}` }],
-          })
-
-          setNetwork(targetNetwork)
-          setCurrentChainId(chainId)
+      // FIXED: Small delay + manual check (in case effect lags)
+      setTimeout(() => {
+        const postSwitchNetwork = networks.find(n => n.chainId === targetChainId)
+        if (!postSwitchNetwork) {
           toast({
-            title: "Network Switched",
-            description: `Successfully switched to ${targetNetwork.name}`,
-            variant: "default",
-          })
-        } catch (addError: any) {
-          console.error(`Error adding network ${targetNetwork.name}:`, addError)
-          toast({
-            title: "Failed to Add Network",
-            description: `Could not add ${targetNetwork.name} to your wallet: ${addError.message}`,
+            title: "Switch Incomplete",
+            description: "Network updated, but state not synced. Refresh page.",
             variant: "destructive",
           })
         }
-      } else {
-        console.error(`Error switching to network ${targetNetwork.name}:`, error)
-        toast({
-          title: "Network Switch Failed",
-          description: `Could not switch to ${targetNetwork.name}: ${error.message}`,
-          variant: "destructive",
-        })
-      }
+      }, 1000)
+
+      toast({
+        title: "Network Switched",
+        description: `Successfully switched to ${targetNetwork.name}`,
+      })
+    } catch (error: any) {
+      console.error(`[switchNetwork] ❌ Error:`, error)
+      
+      toast({
+        title: "Network Switch Failed",
+        description: error?.message || `Could not switch to ${targetNetwork.name}`,
+        variant: "destructive",
+      })
     } finally {
       setIsSwitchingNetwork(false)
     }
-  }
+  }, [isSwitchingNetwork, toast])
 
-  const handleSetNetwork = (newNetwork: Network) => {
-    setNetwork(newNetwork)
+  const handleSetNetwork = useCallback((newNetwork: Network) => {
+    console.log(`[handleSetNetwork] Request to switch: ${newNetwork.name}`)
     switchNetwork(newNetwork.chainId)
-  }
+  }, [switchNetwork])
 
   return (
     <NetworkContext.Provider
@@ -451,6 +360,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
         getFactoryAddress,
         isSwitchingNetwork,
         currentChainId,
+        isConnecting, // NEW: Expose for UI (e.g., show loader)
       }}
     >
       {children}
@@ -462,7 +372,6 @@ export function useNetwork() {
   return useContext(NetworkContext)
 }
 
-// Utility functions
 export function getMainnetNetworks() {
   return networks.filter(network => !network.isTestnet)
 }
@@ -478,7 +387,6 @@ export function getNetworkByChainId(chainId: number) {
 export function isFactoryTypeAvailable(chainId: number, factoryType: 'dropcode' | 'droplist' | 'custom'): boolean {
   const network = getNetworkByChainId(chainId)
   if (!network) return false
-  
   return !!network.factories[factoryType]
 }
 
@@ -487,7 +395,6 @@ export function getAvailableFactoryTypes(chainId: number): ('dropcode' | 'dropli
   if (!network) return []
   
   const availableTypes: ('dropcode' | 'droplist' | 'custom')[] = []
-  
   if (network.factories.dropcode) availableTypes.push('dropcode')
   if (network.factories.droplist) availableTypes.push('droplist')
   if (network.factories.custom) availableTypes.push('custom')

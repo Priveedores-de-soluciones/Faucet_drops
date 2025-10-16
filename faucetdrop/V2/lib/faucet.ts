@@ -1,6 +1,6 @@
 import { type BrowserProvider, Contract, JsonRpcProvider, ZeroAddress, isAddress, getAddress } from "ethers"
 import { FAUCET_ABI_DROPCODE, FAUCET_ABI_CUSTOM, FAUCET_ABI_DROPLIST, ERC20_ABI, CHECKIN_ABI, FACTORY_ABI_DROPCODE, FACTORY_ABI_DROPLIST, FACTORY_ABI_CUSTOM, STORAGE_ABI} from "./abis"
-import { appendDivviReferralData, reportTransactionToDivvi } from "./divvi-integration"
+import { appendDivviReferralData, reportTransactionToDivvi, getDivviStatus, isSupportedNetwork } from "./divvi-integration"
 
 // Fetch faucets for a specific network using getAllFaucets and getFaucetDetails
 interface Network {
@@ -222,10 +222,10 @@ interface NameValidationResult {
 const BACKEND_ADDRESS = process.env.BACKEND_ADDRESS || "0x9fBC2A0de6e5C5Fd96e8D11541608f5F328C0785"
 
 // Storage contract address
-const STORAGE_CONTRACT_ADDRESS = "0x3fC5162779F545Bb4ea7980471b823577825dc8A"
+const STORAGE_CONTRACT_ADDRESS = "0xc26c4Ea50fd3b63B6564A5963fdE4a3A474d4024"
 
 // transactions contract address
-const CHECKIN_CONTRACT_ADDRESS = "0x71C00c430ab70a622dc0b2888C4239cab9F244b0"
+const CHECKIN_CONTRACT_ADDRESS = "0x051dDcB3FaeA6004fD15a990d753449F81733440"
 
 // Celo RPC URL
 const CELO_RPC_URL = "https://forno.celo.org"
@@ -1884,7 +1884,7 @@ export async function retrieveSecretCode(faucetAddress: string): Promise<string>
     }
 
     // Fallback to backend if not found in localStorage
-    const response = await fetch("https://fauctdrop-backend.onrender.com/retrieve-secret-code", {
+    const response = await fetch("http://0.0.0.0:10000/retrieve-secret-code", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -2675,35 +2675,64 @@ export async function storeClaim(
   faucetAddress: string,
   amount: bigint,
   txHash: string,
-  chainId: bigint,
-  networkId: bigint,
-  networkName: string,
+  chainId: number,
+  networkId: number,
+  networkName: string
 ): Promise<string> {
   if (!checkNetwork(chainId, networkId)) {
-    throw new Error("Switch to the network to perform operation")
+    throw new Error("Switch to the network to perform operation");
   }
 
   try {
-    const signer = await provider.getSigner()
-    const storageContract = new Contract(STORAGE_CONTRACT_ADDRESS, STORAGE_ABI, signer)
+    const signer = await provider.getSigner();
+    const signerAddress = await signer.getAddress();
+    const storageContract = new Contract(STORAGE_CONTRACT_ADDRESS, STORAGE_ABI, signer);
 
-    const formattedTxHash = txHash.startsWith("0x") ? txHash : `0x${txHash}`
+    // Convert txHash to bytes32 (ensure it's a valid 32-byte hash)
+    const formattedTxHash = txHash.startsWith('0x') ? txHash : `0x${txHash}`;
     if (!/^0x[a-fA-F0-9]{64}$/.test(formattedTxHash)) {
-      throw new Error(`Invalid transaction hash format: ${formattedTxHash}`)
+      throw new Error(`Invalid transaction hash format: ${formattedTxHash}`);
     }
 
     if (!networkName) {
-      throw new Error("Network name cannot be empty")
+      throw new Error("Network name cannot be empty");
     }
 
+    // Encode function data with parameters in the correct order as per ABI
     const data = storageContract.interface.encodeFunctionData("storeClaim", [
       claimer,
-      faucetAddress,
-      amount,
       formattedTxHash,
+      amount,
       networkName,
-    ])
-    const dataWithReferral = appendDivviReferralData(data)
+      faucetAddress,
+    ]);
+
+    // Append Divvi referral data with additional validation
+    const divviStatus = getDivviStatus();
+    console.log("Divvi SDK status before appending referral:", divviStatus);
+    const dataWithReferral = appendDivviReferralData(data, signerAddress);
+    const referralTag = dataWithReferral.slice(data.length);
+    console.log("Divvi referral data appended:", {
+      originalDataLength: data.length,
+      dataWithReferralLength: dataWithReferral.length,
+      referralTag,
+      referralTagValid: referralTag.startsWith('6decb85d'),
+    });
+
+    // Validate referral tag
+    if (!referralTag.startsWith('6decb85d')) {
+      console.warn("Generated referral tag does not have expected prefix '6decb85d'");
+    }
+
+    // Estimate gas
+    const gasEstimate = await provider.estimateGas({
+      to: STORAGE_CONTRACT_ADDRESS,
+      data: dataWithReferral,
+      from: signerAddress,
+    });
+    const feeData = await provider.getFeeData();
+    const maxFeePerGas = feeData.maxFeePerGas || undefined;
+    const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas || undefined;
 
     console.log("Store claim params:", {
       claimer,
@@ -2711,31 +2740,53 @@ export async function storeClaim(
       amount: amount.toString(),
       txHash: formattedTxHash,
       networkName,
-      chainId: chainId.toString(),
-      networkId: networkId.toString(),
-    })
+      chainId,
+      networkId,
+      signerAddress,
+      gasEstimate: gasEstimate.toString(),
+      maxFeePerGas: maxFeePerGas?.toString(),
+      maxPriorityFeePerGas: maxPriorityFeePerGas?.toString(),
+      divviStatus,
+    });
 
-    // Simplified transaction
     const tx = await signer.sendTransaction({
       to: STORAGE_CONTRACT_ADDRESS,
       data: dataWithReferral,
-    })
+      gasLimit: gasEstimate * BigInt(12) / BigInt(10), // 20% buffer
+      maxFeePerGas,
+      maxPriorityFeePerGas,
+    });
 
-    console.log("Store claim transaction hash:", tx.hash)
-    const receipt = await tx.wait()
-    if (!receipt) {
-      throw new Error("Store claim transaction receipt is null")
+    console.log("Store claim transaction hash:", tx.hash);
+    const receipt = await tx.wait();
+    console.log("Store claim transaction confirmed:", receipt.transactionHash);
+
+    // Ensure transaction is mined before reporting to Divvi
+    if (!receipt || !receipt.blockNumber) {
+      throw new Error("Transaction receipt is null or not mined");
     }
-    console.log("Store claim transaction confirmed:", receipt.hash)
-    await reportTransactionToDivvi(tx.hash as `0x${string}`, Number(chainId))
 
-    return tx.hash
+    // Report the storeClaim transaction hash to Divvi
+    if (isSupportedNetwork(chainId)) {
+      console.log(`Reporting storeClaim transaction ${tx.hash} to Divvi`);
+      await reportTransactionToDivvi(tx.hash as `0x${string}`, chainId);
+    } else {
+      console.warn(`Chain ID ${chainId} is not supported by Divvi, skipping transaction reporting`);
+    }
+
+    return tx.hash;
   } catch (error: any) {
-    console.error("Error storing claim:", error)
+    console.error("Error storing claim:", error);
     if (error.message?.includes("network changed")) {
-      throw new Error("Network changed during transaction. Please try again with a stable network connection.")
+      throw new Error("Network changed during transaction. Please try again with a stable network connection.");
     }
-    throw new Error(error.reason || error.message || "Failed to store claim")
+    if (error.message?.includes("Invalid Divvi referral data")) {
+      throw new Error("Failed to append valid Divvi referral data. Please check Divvi SDK integration.");
+    }
+    if (error.message?.includes("Failed to report transaction to Divvi")) {
+      throw new Error("Failed to report transaction to Divvi. Claim recorded, but referral tracking may be incomplete.");
+    }
+    throw new Error(error.reason || error.message || "Failed to store claim");
   }
 }
 

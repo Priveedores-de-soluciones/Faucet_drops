@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import { useWallet } from "@/hooks/use-wallet"
@@ -23,6 +23,7 @@ import {
   withdrawTokens,
   setClaimParameters,
   saveToStorage,
+  storeClaim,
   getFromStorage,
   updateFaucetName,
   deleteFaucet,
@@ -62,11 +63,13 @@ import { Pagination, PaginationContent, PaginationItem, PaginationLink, Paginati
 import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import LoadingPage from "@/components/loading"
 
 // Faucet type definitions
 type FaucetType = 'dropcode' | 'droplist' | 'custom'
 
 export default function FaucetDetails() {
+  
   const { address: faucetAddress } = useParams<{ address: string }>()
   const searchParams = useSearchParams()
   const networkId = searchParams.get("networkId")
@@ -99,7 +102,10 @@ export default function FaucetDetails() {
   const [tokenSymbol, setTokenSymbol] = useState("ETH")
   const [tokenDecimals, setTokenDecimals] = useState(18)
   const [hasClaimed, setHasClaimed] = useState(false)
-  
+  const [isGeneratingNewCode, setIsGeneratingNewCode] = useState(false)
+  const [showNewCodeDialog, setShowNewCodeDialog] = useState(false)
+  const [newlyGeneratedCode, setNewlyGeneratedCode] = useState("")
+
   // Verification system states
   const [usernames, setUsernames] = useState<Record<string, string>>({})
   const [verificationStates, setVerificationStates] = useState<Record<string, boolean>>({})
@@ -143,7 +149,25 @@ export default function FaucetDetails() {
   const [isSavingSocialLinks, setIsSavingSocialLinks] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const transactionsPerPage = 10
+  const [customXPostTemplate, setCustomXPostTemplate] = useState("")
+  const [isLoadingXTemplate, setIsLoadingXTemplate] = useState(false)
+  
+useEffect(() => {
+  // Prevent infinite loading
+  const loadingTimeout = setTimeout(() => {
+    if (loading) {
+      console.warn('⏰ Loading timeout - forcing stop')
+      setLoading(false)
+      toast({
+        title: "Loading took too long",
+        description: "Please refresh the page",
+        variant: "destructive",
+      })
+    }
+  }, 15000) // 15 second timeout
 
+  return () => clearTimeout(loadingTimeout)
+}, [loading, toast])
   // ✅ UPDATED: Allow admin, owner, and backend address to access drop code
   const FACTORY_OWNER_ADDRESS = "0x9fBC2A0de6e5C5Fd96e8D11541608f5F328C0785" // Backend address
   const isOwner = address && faucetDetails?.owner && address.toLowerCase() === faucetDetails.owner.toLowerCase()
@@ -208,7 +232,7 @@ const handleStartTimeChange = (e) => {
     switch(platform.toLowerCase()) {
       case 'telegram': return 'Join'
       case 'discord': return 'Join'
-      case 'twitter':
+      case '𝕏':
       case 'x': return 'Follow'
       case 'youtube': return 'Subscribe'
       case 'instagram': return 'Follow'
@@ -220,7 +244,7 @@ const handleStartTimeChange = (e) => {
     switch(platform.toLowerCase()) {
       case 'telegram': return '📱'
       case 'discord': return '💬'
-      case 'twitter':
+      case '𝕏':
       case 'x': return '𝕏'
       case 'youtube': return '📺'
       case 'instagram': return '📷'
@@ -284,49 +308,192 @@ const handleStartTimeChange = (e) => {
     }
   }
 
-  const loadSocialMediaLinks = async (): Promise<void> => {
-    if (!faucetAddress) return
+const loadCustomXPostTemplate = async (): Promise<void> => {
+  if (!faucetAddress) return
+  
+  try {
+    setIsLoadingXTemplate(true)
+    console.log(`🔍 Loading custom X post template for faucet: ${faucetAddress}`)
     
-    try {
-      setIsLoadingSocialLinks(true)
-      console.log(`🔍 Loading social media links for faucet: ${faucetAddress}`)
-      
-      const response = await fetch(`https://fauctdrop-backend.onrender.com/social-media-links/${faucetAddress}`)
-      
-      if (!response.ok) {
-        if (response.status === 404) {
-          console.log('📝 No social media links found for this faucet')
-          setDynamicTasks([])
-          return
-        }
-        throw new Error(`Failed to load social media links: ${response.status}`)
+    const response = await fetch(`https://fauctdrop-backend.onrender.com/faucet-x-template/${faucetAddress}`)
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        console.log("📝 No custom X post template found, using default template")
+        // PRE-FILL with default template so owner can edit it
+        setCustomXPostTemplate(
+          `I just received a drop of {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
+        )
+        return
       }
-      
-      const result = await response.json()
-      
-      if (result.success && result.socialMediaLinks) {
-        setDynamicTasks(result.socialMediaLinks)
-        console.log(`✅ Loaded ${result.socialMediaLinks.length} social media links`)
-      } else {
-        setDynamicTasks([])
-      }
-      
-    } catch (error) {
-      console.error('❌ Error loading social media links:', error)
-      setDynamicTasks([])
-      toast({
-        title: "Warning",
-        description: "Could not load social media tasks. Using default verification.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoadingSocialLinks(false)
+      throw new Error(`Failed to load X post template: ${response.status}`)
     }
+    
+    const result = await response.json()
+    
+    if (result.success && result.template) {
+      setCustomXPostTemplate(result.template)
+      console.log(`✅ Loaded custom X post template for faucet ${faucetAddress}`)
+    } else {
+      console.log("📝 No custom template set, pre-filling with default")
+      // PRE-FILL with default template so owner can edit it
+      setCustomXPostTemplate(
+        `I just received a drop of {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
+      )
+    }
+    
+  } catch (error) {
+    console.error('❌ Error loading X post template:', error)
+    // PRE-FILL with default template even on error
+    setCustomXPostTemplate(
+      `I just received a drop of {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
+    )
+    toast({
+      title: "Could not load custom template",
+      description: "Using default share message instead.",
+      variant: "default",
+    })
+  } finally {
+    setIsLoadingXTemplate(false)
   }
+}
 
+const saveCustomXPostTemplate = async (): Promise<void> => {
+  if (!faucetAddress || !address || !chainId) {
+    console.warn("Missing required parameters for saving X post template")
+    return
+  }
+  
+  // If template is empty or just the default, don't save (will use default on backend)
+  if (!customXPostTemplate || !customXPostTemplate.trim()) {
+    console.log("💾 Template is empty, will use default")
+    return
+  }
+  
+  try {
+    console.log(`💾 Saving X post template for faucet: ${faucetAddress}`)
+    
+    const response = await fetch('https://fauctdrop-backend.onrender.com/faucet-x-template', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        faucetAddress,
+        template: customXPostTemplate,
+        userAddress: address,
+        chainId: Number(chainId)
+      }),
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.detail || 'Failed to save X post template')
+    }
+    
+    const result = await response.json()
+    console.log('✅ X post template saved:', result)
+    
+    toast({
+      title: "Template Saved",
+      description: "Your custom X post template has been saved successfully.",
+    })
+    
+  } catch (error: any) {
+    console.error('❌ Error saving X post template:', error)
+    toast({
+      title: "Failed to Save Template",
+      description: error.message || "Could not save X post template. Please try again.",
+      variant: "destructive",
+    })
+    throw error
+  }
+}
+
+ // ✅ UPDATED: Load social media tasks for ALL faucet types
+const loadSocialMediaLinks = async (): Promise<void> => {
+  if (!faucetAddress) return
+  
+  try {
+    setIsLoadingSocialLinks(true)
+    console.log(`🔍 Loading social media tasks for ${faucetType || 'unknown'} faucet: ${faucetAddress}`)
+    
+    const response = await fetch(`https://fauctdrop-backend.onrender.com/faucet-tasks/${faucetAddress}`)
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        console.log(`📝 No social media tasks found for ${faucetType || 'unknown'} faucet`)
+        setDynamicTasks([])
+        return
+      }
+      throw new Error(`Failed to load social media tasks: ${response.status}`)
+    }
+    
+    const result = await response.json()
+    
+    if (result.success && result.tasks) {
+      // ✅ Convert backend tasks to frontend social media format for ALL faucet types
+      const socialLinks = result.tasks.map(task => {
+        // Check if task has social media info stored (new format)
+        if (task.platform && task.handle && task.action) {
+          return {
+            platform: task.platform,
+            url: task.url,
+            handle: task.handle,
+            action: task.action
+          }
+        } else {
+          // Extract from title/description for backwards compatibility
+          const content = (task.title + ' ' + task.description).toLowerCase()
+          let platform = '𝕏' // default
+          if (content.includes('telegram')) platform = 'telegram'
+          else if (content.includes('discord')) platform = 'discord'
+          else if (content.includes('youtube')) platform = 'youtube'
+          else if (content.includes('instagram')) platform = 'instagram'
+          else if (content.includes('tiktok')) platform = 'tiktok'
+          else if (content.includes('facebook')) platform = 'facebook'
+          
+          // Extract handle from title/description  
+          const handleMatch = (task.title + ' ' + task.description).match(/@([a-zA-Z0-9_]+)/)
+          const handle = handleMatch ? `@${handleMatch[1]}` : ''
+          
+          // Extract action from title
+          let action = 'follow' // default
+          if (task.title.toLowerCase().includes('subscribe')) action = 'subscribe'
+          else if (task.title.toLowerCase().includes('join')) action = 'join'
+          else if (task.title.toLowerCase().includes('like')) action = 'like'
+          else if (task.title.toLowerCase().includes('retweet')) action = 'retweet'
+          
+          return {
+            platform,
+            url: task.url,
+            handle,
+            action
+          }
+        }
+      })
+      
+      setDynamicTasks(socialLinks)
+      console.log(`✅ Loaded ${socialLinks.length} social media tasks for ${faucetType || 'unknown'} faucet`)
+    } else {
+      setDynamicTasks([])
+    }
+    
+  } catch (error) {
+    console.error('❌ Error loading social media tasks:', error)
+    setDynamicTasks([])
+    toast({
+      title: "Warning",
+      description: "Could not load social media tasks. Using default verification.",
+      variant: "destructive",
+    })
+  } finally {
+    setIsLoadingSocialLinks(false)
+  }
+}
   const addNewSocialLink = (): void => {
     setNewSocialLinks([...newSocialLinks, {
-      platform: 'twitter',
+      platform: '𝕏',
       url: '',
       handle: '',
       action: 'follow'
@@ -458,12 +625,36 @@ const handleStartTimeChange = (e) => {
   const shouldShowSecretCodeButton = (): boolean => faucetType === 'dropcode' && canAccessDropCode
 
   
-  const popupContent = (amount: string, txHash: string | null) =>
-    `I just received a drop of ${amount} ${tokenSymbol} from @FaucetDrops on ${selectedNetwork?.name || "the network"}. Verify Drop 💧: ${
-      txHash
-        ? `${selectedNetwork?.blockExplorerUrls || "https://explorer.unknown"}/tx/0x${txHash.slice(2)}`
+  // REPLACE the generateXPostContent function with this FIXED version:
+const generateXPostContent = (amount: string, txHash: string | null): string => {
+  // If custom template exists, use it
+  if (customXPostTemplate && customXPostTemplate.trim()) {
+    let content = customXPostTemplate
+    
+    // Replace placeholders with actual values
+    content = content.replace(/\{amount\}/g, amount)
+    content = content.replace(/\{token\}/g, tokenSymbol)
+    content = content.replace(/\{network\}/g, selectedNetwork?.name || "the network")
+    content = content.replace(/\{faucet\}/g, faucetDetails?.name || "this faucet")
+    content = content.replace(/\{txHash\}/g, txHash || "Transaction not available")
+    content = content.replace(/\{explorer\}/g, 
+      txHash 
+        ? `${selectedNetwork?.blockExplorerUrls || "https://explorer.unknown"}/tx/${txHash}` // FIXED: use blockExplorerUrls
         : "Transaction not available"
-    }`
+    )
+    
+    console.log("📱 Using custom X post template:", content)
+    return content
+  }
+  
+  // Default template (fallback)
+  console.log("📱 Using default X post template")
+  return `I just received a drop of ${amount} ${tokenSymbol} from @FaucetDrops on ${selectedNetwork?.name || "the network"}. Verify Drop 💧: ${
+    txHash
+      ? `${selectedNetwork?.blockExplorerUrls || "https://explorer.unknown"}/tx/${txHash}` // FIXED: use blockExplorerUrls
+      : "Transaction not available"
+  }`
+}
 
   const calculateFee = (amount: string) => {
     try {
@@ -488,15 +679,17 @@ const handleStartTimeChange = (e) => {
     setShowFollowDialog(true)
   }
 
-  const handleShareOnX = (): void => {
-    const claimedAmount = faucetType === 'custom' && hasCustomAmount
-      ? formatUnits(userCustomClaimAmount, tokenDecimals)
-      : faucetDetails ? formatUnits(faucetDetails.claimAmount, tokenDecimals) : "0"
-    const shareText = encodeURIComponent(popupContent(claimedAmount, txHash))
-    const shareUrl = `https://x.com/intent/tweet?text=${shareText}`
-    window.open(shareUrl, "_blank")
-    setShowClaimPopup(false)
-  }
+  
+const handleShareOnX = (): void => {
+  const claimedAmount = faucetType === 'custom' && hasCustomAmount
+    ? formatUnits(userCustomClaimAmount, tokenDecimals)
+    : faucetDetails ? formatUnits(faucetDetails.claimAmount, tokenDecimals) : "0"
+  const shareText = encodeURIComponent(generateXPostContent(claimedAmount, txHash))
+  const shareUrl = `https://x.com/intent/tweet?text=${shareText}`
+  window.open(shareUrl, "_blank")
+  setShowClaimPopup(false)
+}
+
 
   const handleCopySecretCode = async (code: string): Promise<void> => {
     try {
@@ -971,170 +1164,66 @@ const handleStartTimeChange = (e) => {
   }
 
   // ✅ FIXED: Updated loadFaucetDetails function with proper network handling
-  const loadFaucetDetails = async (): Promise<void> => {
-    if (!faucetAddress || !networkId) {
+  const loadFaucetDetails = useCallback(async (): Promise<void> => {
+  if (!faucetAddress || !networkId) {
+    toast({
+      title: "Invalid Parameters",
+      description: "Faucet address or network ID is missing",
+      variant: "destructive",
+    })
+    setLoading(false)
+    return
+  }
+  
+  try {
+    setLoading(true)
+    
+    const targetNetworkId = Number(networkId)
+    const targetNetwork = networks.find((n) => n.chainId === targetNetworkId)
+    
+    if (!targetNetwork) {
       toast({
-        title: "Invalid Parameters",
-        description: "Faucet address or network ID is missing",
+        title: "Network Not Found", 
+        description: `Network ID ${networkId} is not supported`,
         variant: "destructive",
       })
       setLoading(false)
+      router.push("/")
       return
     }
     
-    try {
-      setLoading(true)
-      
-      // ✅ CRITICAL FIX: Find the correct network by chainId and validate
-      const targetNetworkId = Number(networkId)
-      const targetNetwork = networks.find((n) => n.chainId === targetNetworkId)
-      
-      if (!targetNetwork) {
-        toast({
-          title: "Network Not Found", 
-          description: `Network ID ${networkId} is not supported`,
-          variant: "destructive",
-        })
-        setLoading(false)
-        router.push("/")
-        return
-      }
-      
-      console.log(`🌐 Loading faucet details for network: ${targetNetwork.name} (Chain ID: ${targetNetwork.chainId})`)
-      setSelectedNetwork(targetNetwork)
-      
-      // ✅ CRITICAL FIX: Always use the target network's RPC URL for reading data
-      const detailsProvider = new JsonRpcProvider(targetNetwork.rpcUrl)
-      console.log(`🔗 Using RPC: ${targetNetwork.rpcUrl}`)
-      
-      // STEP 1: Get faucet type directly from contract
-      console.log("🔍 Step 1: Getting faucet type from contract...")
-      let detectedType: FaucetType
-      try {
-        detectedType = await detectFaucetType(detailsProvider, faucetAddress)
-        console.log(`✅ Detected type: ${detectedType} on ${targetNetwork.name}`)
-        setFaucetType(detectedType)
-      } catch (error) {
-        console.error("❌ Failed to detect type, defaulting to dropcode:", error)
-        detectedType = 'dropcode'
-        setFaucetType('dropcode')
-      }
-      
-      // STEP 2: Get faucet details with the detected type and correct network
-      console.log(`📋 Step 2: Getting faucet details for ${detectedType} on ${targetNetwork.name}`)
-      
-      // ✅ FIXED: Pass network information to getFaucetDetails
-      const details = await getFaucetDetails(detailsProvider, faucetAddress, detectedType, targetNetwork)
-      
-      // ✅ CRITICAL FIX: Ensure the details have the correct network information
-      if (details) {
-        details.network = targetNetwork
-        console.log(`✅ Faucet details loaded for ${targetNetwork.name}:`, {
-          type: detectedType,
-          tokenSymbol: details.tokenSymbol,
-          balance: details.balance ? formatUnits(details.balance, details.tokenDecimals || 18) : "0",
-          isEther: details.isEther
-        })
-      }
-      
-      // STEP 3: Double-check type from details (if available)
-      if (details.faucetType && details.faucetType !== detectedType) {
-        console.log(`🔄 Type mismatch detected, updating from ${detectedType} to ${details.faucetType}`)
-        setFaucetType(details.faucetType)
-        detectedType = details.faucetType
-      }
-      
-      setFaucetDetails(details)
-      console.log(`✅ Final faucet type: ${detectedType} on ${targetNetwork.name}`)
-      
-      // ✅ CRITICAL FIX: Safe admin loading with error handling
-      try {
-        const admins = await getAllAdmins(detailsProvider, faucetAddress, detectedType)
-        const [factoryOwnerAddr, ...otherAdmins] = admins
-        setFactoryOwner(factoryOwnerAddr)
-        
-        // Create admin list that includes owner but excludes factory owner
-        const allAdminsIncludingOwner = [details.owner, ...otherAdmins].filter(
-          (admin, index, self) => 
-            self.indexOf(admin) === index && 
-            admin.toLowerCase() !== FACTORY_OWNER_ADDRESS.toLowerCase()
-        )
-        
-        setAdminList(allAdminsIncludingOwner)
-        
-        if (address) {
-          const isUserAdmin = otherAdmins.some((admin: string) => admin.toLowerCase() === address.toLowerCase())
-          setUserIsAdmin(isUserAdmin)
-          
-          if (isUserAdmin || (address.toLowerCase() === details.owner.toLowerCase())) {
-            const dontShowAgain = await getAdminPopupPreference(address, faucetAddress)
-            if (!dontShowAgain) {
-              setShowAdminPopup(true)
-            }
-          }
-        } else {
-          setUserIsAdmin(false)
-        }
-      } catch (adminError) {
-        console.error("⚠️ Error loading admins (non-fatal):", adminError)
-        // Set default admin data
-        setAdminList(details.owner ? [details.owner] : [])
-        setUserIsAdmin(false)
-        setFactoryOwner(null)
-      }
-      
-      // ✅ CRITICAL FIX: Set token symbol with network-specific defaults
-      // The token symbol should now be correctly set from getFaucetDetails with network info
-      const tokenSym = details.tokenSymbol || targetNetwork.nativeCurrency.symbol
-      setTokenSymbol(tokenSym)
-      console.log(`💰 Token symbol set to: ${tokenSym} (isEther: ${details.isEther}, network: ${targetNetwork.name})`)
-      
-      // Set other details
-      setTokenDecimals(details.tokenDecimals || 18)
-      setHasClaimed(details.hasClaimed || false)
-      setBackendMode(details.backendMode)
-      
-      if (details.claimAmount) {
-        setClaimAmount(formatUnits(details.claimAmount, details.tokenDecimals || 18))
-      }
-      if (details.startTime) {
-        const date = new Date(Number(details.startTime) * 1000)
-        setStartTime(date.toISOString().slice(0, 16))
-      }
-      if (details.endTime) {
-        const date = new Date(Number(details.endTime) * 1000)
-        setEndTime(date.toISOString().slice(0, 16))
-      }
-      
-      // Handle different faucet type specific logic
-      if (address) {
-        if (detectedType === 'droplist') {
-          const whitelisted = await isWhitelisted(detailsProvider, faucetAddress, address, detectedType)
-          setUserIsWhitelisted(whitelisted)
-          console.log(`✅ User droplist status on ${targetNetwork.name}:`, whitelisted)
-        } else if (detectedType === 'custom') {
-          const customClaimInfo = await getUserCustomClaimAmount(detailsProvider, address)
-          setUserCustomClaimAmount(customClaimInfo.amount)
-          setHasCustomAmount(customClaimInfo.hasCustom)
-          console.log(`✅ User custom claim on ${targetNetwork.name}:`, formatUnits(customClaimInfo.amount, details.tokenDecimals || 18), "Has custom:", customClaimInfo.hasCustom)
-        }
-      } else {
-        setUserIsWhitelisted(false)
-        setUserCustomClaimAmount(BigInt(0))
-        setHasCustomAmount(false)
-      }
-      
-    } catch (error) {
-      console.error(`❌ Error loading faucet details for ${networkId}:`, error)
-      toast({
-        title: "Failed to load faucet details",
-        description: error instanceof Error ? error.message : "Unknown error occurred",
-        variant: "destructive",
-      })
-    } finally {
-      setLoading(false)
-    }
+    console.log(`🌐 Loading faucet details for network: ${targetNetwork.name}`)
+    setSelectedNetwork(targetNetwork)
+    
+    const detailsProvider = new JsonRpcProvider(targetNetwork.rpcUrl)
+    
+    // ... rest of your loadFaucetDetails code ...
+    
+  } catch (error) {
+    console.error(`❌ Error loading faucet details:`, error)
+    toast({
+      title: "Failed to load faucet details",
+      description: error instanceof Error ? error.message : "Unknown error occurred",
+      variant: "destructive",
+    })
+  } finally {
+    setLoading(false)
   }
+}, [faucetAddress, networkId, networks, router, toast])   
+useEffect(() => {
+  // Reload when address changes (for whitelist/admin status)
+  if (address && faucetDetails && !loading) {
+    console.log('👤 Address changed, refreshing status...')
+    loadFaucetDetails()
+  }
+}, [address]) 
+useEffect(() => {
+  // Only load if we have required params
+  if (faucetAddress && networkId) {
+    console.log('📥 Loading faucet details...', { faucetAddress, networkId })
+    loadFaucetDetails()
+  }
+}, [faucetAddress, networkId, loadFaucetDetails])
 
   const getAdminPopupPreference = async (userAddr: string, faucetAddr: string): Promise<boolean> => {
     try {
@@ -1190,113 +1279,237 @@ const handleStartTimeChange = (e) => {
 
   // ✅ FIXED: Handle backend claim with proper faucet type validation
   async function handleBackendClaim(): Promise<void> {
-    if (!isConnected || !address || !provider) {
-      toast({
-        title: "Wallet not connected",
-        description: "Please connect your wallet to drop tokens",
-        variant: "destructive",
-      })
-      return
-    }
-    if (!chainId || !networkId) {
-      toast({
-        title: "Network not detected",
-        description: "Please ensure your wallet is connected to a supported network",
-        variant: "destructive",
-      })
-      return
-    }
-
-    // ✅ FIXED: Validation based on actual faucet type
-    if (faucetType === 'dropcode' && backendMode && !isSecretCodeValid) {
-      toast({
-        title: "Invalid Drop code",
-        description: "Please enter a valid 6-character alphanumeric Drop code",
-        variant: "destructive",
-      })
-      return
-    }
-    
-    if (faucetType === 'droplist' && !userIsWhitelisted) {
-      toast({
-        title: "Not Drop-listed",
-        description: "You are not Drop-listed to claim from this faucet",
-        variant: "destructive",
-      })
-      return
-    }
-    
-    if (faucetType === 'custom' && !hasCustomAmount) {
-      toast({
-        title: "No Custom Allocation",
-        description: "You don't have a custom amount allocated for this faucet",
-        variant: "destructive",
-      })
-      return
-    }
-    
-    if (!allAccountsVerified) {
-      toast({
-        title: "Verification Required",
-        description: "Please complete and verify all required tasks before claiming",
-        variant: "destructive",
-      })
-      return
-    }
-    if (!checkNetwork()) return
-    try {
-      setIsClaiming(true)
-      if (!window.ethereum) {
-        throw new Error("Wallet not detected. Please install MetaMask or another Ethereum wallet.")
-      }
-      await window.ethereum.request({ method: "eth_requestAccounts" })
-      console.log("Sending drop request", { 
-        faucetType, 
-        backendMode, 
-        secretCode: (faucetType === 'dropcode' && backendMode) ? secretCode : "N/A" 
-      })
-      
-      // ✅ FIXED: Use appropriate claiming method based on actual faucet type
-      const result = faucetType === 'custom'
-        ? await claimCustomViaBackend(address, faucetAddress, provider as BrowserProvider)
-        : (faucetType === 'dropcode' && backendMode)
-        ? await claimViaBackend(address, faucetAddress, provider as BrowserProvider, secretCode)
-        : await claimNoCodeViaBackend(address, faucetAddress, provider as BrowserProvider)
-        
-      const formattedTxHash = result.txHash.startsWith("0x") ? result.txHash : (`0x${result.txHash}` as `0x${string}`)
-      setTxHash(formattedTxHash)
-      const networkName = selectedNetwork?.name || "Unknown Network"
-      
-      // Get the claimed amount for display
-      const claimedAmount = faucetType === 'custom' && hasCustomAmount
-        ? formatUnits(userCustomClaimAmount, tokenDecimals)
-        : faucetDetails.claimAmount 
-          ? formatUnits(faucetDetails.claimAmount, tokenDecimals)
-          : "tokens"
-      
-      toast({
-        title: "Tokens dropped successfully",
-        description: `You have dropped ${claimedAmount} ${tokenSymbol} on ${networkName}`,
-      })
-      setShowClaimPopup(true)
-      setSecretCode("")
-      await loadFaucetDetails()
-      await loadTransactionHistory()
-    } catch (error: any) {
-      console.error("Error dropping tokens:", error)
-      let errorMessage = error.message || "Unknown error occurred"
-      if (errorMessage.includes("Unauthorized: Invalid Drop code")) {
-        errorMessage = "Invalid Drop code. Please check and try again."
-      }
-      toast({
-        title: "Failed to drop tokens",
-        description: errorMessage,
-        variant: "destructive",
-      })
-    } finally {
-      setIsClaiming(false)
-    }
+  if (!isConnected || !address || !provider) {
+    toast({
+      title: "Wallet not connected",
+      description: "Please connect your wallet to drop tokens",
+      variant: "destructive",
+    });
+    return;
   }
+
+  if (!chainId || !networkId) {
+    toast({
+      title: "Network not detected",
+      description: "Please ensure your wallet is connected to a supported network",
+      variant: "destructive",
+    });
+    return;
+  }
+
+  // Validation based on faucet type
+  if (faucetType === 'dropcode' && backendMode && !isSecretCodeValid) {
+    toast({
+      title: "Invalid Drop code",
+      description: "Please enter a valid 6-character alphanumeric Drop code",
+      variant: "destructive",
+    });
+    return;
+  }
+
+  if (faucetType === 'droplist' && !userIsWhitelisted) {
+    toast({
+      title: "Not Drop-listed",
+      description: "You are not Drop-listed to claim from this faucet",
+      variant: "destructive",
+    });
+    return;
+  }
+
+  if (faucetType === 'custom' && !hasCustomAmount) {
+    toast({
+      title: "No Custom Allocation",
+      description: "You don't have a custom amount allocated for this faucet",
+      variant: "destructive",
+    });
+    return;
+  }
+
+  if (!allAccountsVerified) {
+    toast({
+      title: "Verification Required",
+      description: "Please complete and verify all required tasks before claiming",
+      variant: "destructive",
+    });
+    return;
+  }
+
+  if (!checkNetwork()) return;
+
+  try {
+    setIsClaiming(true);
+    if (!window.ethereum) {
+      throw new Error("Wallet not detected. Please install MetaMask or another Ethereum wallet.");
+    }
+    await window.ethereum.request({ method: "eth_requestAccounts" });
+    console.log("Sending drop request", {
+      faucetType,
+      backendMode,
+      secretCode: (faucetType === 'dropcode' && backendMode) ? secretCode : "N/A",
+    });
+
+    // Perform the claim based on faucet type
+    const result = faucetType === 'custom'
+      ? await claimCustomViaBackend(address, faucetAddress, provider as BrowserProvider)
+      : (faucetType === 'dropcode' && backendMode)
+      ? await claimViaBackend(address, faucetAddress, provider as BrowserProvider, secretCode)
+      : await claimNoCodeViaBackend(address, faucetAddress, provider as BrowserProvider);
+
+    const formattedTxHash = result.txHash.startsWith("0x") ? result.txHash : (`0x${result.txHash}` as `0x${string}`);
+    setTxHash(formattedTxHash);
+    const networkName = selectedNetwork?.name || "Unknown Network";
+
+    // Get the claimed amount for on-chain storage
+    const claimAmountBN = faucetType === 'custom' && hasCustomAmount
+      ? userCustomClaimAmount
+      : faucetDetails.claimAmount || 0n;
+
+    // Store the claim on-chain using the updated storeClaim function
+    await storeClaim(
+      provider as BrowserProvider,
+      address,
+      faucetAddress,
+      claimAmountBN,
+      formattedTxHash,
+      chainId,
+      Number(networkId),
+      networkName
+    );
+
+    // Get the claimed amount for display
+    const claimedAmount = faucetType === 'custom' && hasCustomAmount
+      ? formatUnits(userCustomClaimAmount, tokenDecimals)
+      : faucetDetails.claimAmount
+      ? formatUnits(faucetDetails.claimAmount, tokenDecimals)
+      : "tokens";
+
+    toast({
+      title: "Tokens dropped successfully",
+      description: `You have dropped ${claimedAmount} ${tokenSymbol} on ${networkName} and recorded the claim on-chain`,
+    });
+    setShowClaimPopup(true);
+    setSecretCode("");
+    await loadFaucetDetails();
+    await loadTransactionHistory();
+  } catch (error: any) {
+    console.error("Error dropping tokens:", error);
+    let errorMessage = error.reason || error.message || "Unknown error occurred";
+    if (errorMessage.includes("Unauthorized: Invalid Drop code")) {
+      errorMessage = "Invalid Drop code. Please check and try again.";
+    } else if (errorMessage.includes("Network changed during transaction")) {
+      errorMessage = "Network changed during transaction. Please try again with a stable network connection.";
+    } else if (errorMessage.includes("Invalid transaction hash format")) {
+      errorMessage = "Invalid transaction hash format. Please try again.";
+    }
+    toast({
+      title: "Failed to drop tokens",
+      description: errorMessage,
+      variant: "destructive",
+    });
+  } finally {
+    setIsClaiming(false);
+  }
+}
+
+  const handleGenerateNewDropCode = async (): Promise<void> => {
+  if (!isConnected || !address || !chainId) {
+    toast({
+      title: "Wallet not connected",
+      description: "Please connect your wallet and ensure a network is selected",
+      variant: "destructive",
+    })
+    return
+  }
+  
+  if (faucetType !== 'dropcode') {
+    toast({
+      title: "Not Available",
+      description: "This feature is only available for Drop Code faucets",
+      variant: "destructive",
+    })
+    return
+  }
+  
+  if (!canAccessDropCode) {
+    toast({
+      title: "Unauthorized", 
+      description: "Only the faucet owner, admin, or authorized personnel can generate new drop codes",
+      variant: "destructive",
+    })
+    return
+  }
+
+  try {
+    setIsGeneratingNewCode(true)
+    
+    console.log(`🔄 Generating new drop code for faucet: ${faucetAddress}`)
+    
+    const response = await fetch("https://fauctdrop-backend.onrender.com/generate-new-drop-code", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        faucetAddress,
+        userAddress: address,
+        chainId: Number(chainId)
+      }),
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.detail || "Failed to generate new drop code")
+    }
+    
+    const result = await response.json()
+    const newCode = result.secretCode
+    
+    // Cache the new code and invalidate old cache
+    saveToStorage(`secretCode_${faucetAddress}`, newCode)
+    
+    // Clear any cached secret code data to force fresh retrieval
+    try {
+      localStorage.removeItem(`secretCode_${faucetAddress}_cached`)
+      localStorage.removeItem(`secretCodeData_${faucetAddress}`)
+    } catch (e) {
+      console.warn('Could not clear localStorage cache:', e)
+    }
+    
+    setNewlyGeneratedCode(newCode)
+    setShowNewCodeDialog(true)
+    
+    console.log(`✅ New drop code generated: ${newCode}`)
+    
+    toast({
+      title: "New Drop Code Generated! 🎉",
+      description: "A fresh drop code has been generated and is now active",
+    })
+    
+  } catch (error: any) {
+    console.error('❌ Failed to generate new drop code:', error)
+    
+    let errorMessage = "Unknown error occurred"
+    let errorTitle = "Failed to generate Drop code"
+    
+    if (error.message.includes('403')) {
+      errorTitle = "Unauthorized"
+      errorMessage = "Only authorized users can generate new drop codes"
+    } else if (error.message.includes('404')) {
+      errorTitle = "Faucet Not Found"
+      errorMessage = "The specified faucet could not be found"
+    } else {
+      errorMessage = error.message || "Failed to generate the new drop code"
+    }
+    
+    toast({
+      title: errorTitle,
+      description: errorMessage,
+      variant: "destructive",
+    })
+  } finally {
+    setIsGeneratingNewCode(false)
+  }
+}
 
   const handleFund = async (): Promise<void> => {
     if (!isConnected || !provider || !fundAmount || !chainId) {
@@ -1335,7 +1548,7 @@ const handleStartTimeChange = (e) => {
       )
       toast({
         title: "Faucet funded successfully",
-        description: `You have added ${formatUnits(amount, tokenDecimals)} ${tokenSymbol} to the faucet (after 3% platform fee)`,
+        description: `You have added ${formatUnits(amount, tokenDecimals)} ${tokenSymbol} to the faucet (minus 3% platform fee)`,
       })
       setFundAmount("")
       setAdjustedFundAmount("")
@@ -1402,150 +1615,204 @@ const handleStartTimeChange = (e) => {
     }
   }
 
-  // ✅ UPDATED: Enhanced handleUpdateClaimParameters with social media links integration
-  const handleUpdateClaimParameters = async (): Promise<void> => {
-    if (!isConnected || !provider || !chainId) {
-      toast({
-        title: "Wallet not connected",
-        description: "Please connect your wallet and ensure a network is selected",
-        variant: "destructive",
-      })
-      return
-    }
-    
-    // ✅ FIXED: For custom faucets, claimAmount is not required
-    if (faucetType !== 'custom' && !claimAmount) {
-      toast({
-        title: "Invalid Input",
-        description: "Please fill in the drop amount",
-        variant: "destructive",
-      })
-      return
-    }
-    
-    if (!startTime || !endTime) {
-      toast({
-        title: "Invalid Input",
-        description: "Please fill in the start and end times",
-        variant: "destructive",
-      })
-      return
-    }
-    if (!checkNetwork()) return
-
-    try {
-      setIsUpdatingParameters(true)
-      // ✅ For custom faucets, use 0 as claim amount since individual amounts are set separately
-      const claimAmountBN = faucetType === 'custom' ? BigInt(0) : parseUnits(claimAmount, tokenDecimals)
-      const startTimestamp = Math.floor(new Date(startTime).getTime() / 1000)
-      const endTimestamp = Math.floor(new Date(endTime).getTime() / 1000)
-      
-      let secretCodeFromBackend = ""
-      
-      // ✅ NEW: Prepare social media links data from newSocialLinks
-      const socialLinksToSend = newSocialLinks.filter(link => 
-        link.url.trim() && link.handle.trim()
-      ).map(link => ({
-        platform: link.platform,
-        url: link.url.trim(),
-        handle: link.handle.trim(),
-        action: link.action
-      }))
-      
-      // ✅ FIXED: Only generate secret code for dropcode faucets in backend mode
-      if (faucetType === 'dropcode' && backendMode) {
-        const response = await fetch("https://fauctdrop-backend.onrender.com/set-claim-parameters", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            faucetAddress,
-            claimAmount: claimAmountBN.toString(),
-            startTime: startTimestamp,
-            endTime: endTimestamp,
-            chainId: Number(chainId),
-            socialMediaLinks: socialLinksToSend
-          }),
-        })
-        
-        if (!response.ok) {
-          const errorData = await response.json()
-          throw new Error(errorData.detail || "Failed to set drop parameters")
-        }
-        
-        const result = await response.json()
-        secretCodeFromBackend = result.secretCode
-        
-        console.log(`✅ Social media links stored: ${result.socialMediaLinksStored || 0}`)
-      } else if (socialLinksToSend.length > 0) {
-        // ✅ NEW: For non-dropcode faucets, save social media links separately
-        const response = await fetch("https://fauctdrop-backend.onrender.com/update-social-media-links", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            faucetAddress,
-            socialMediaLinks: socialLinksToSend
-          }),
-        })
-        
-        if (response.ok) {
-          const result = await response.json()
-          console.log(`✅ Social media links updated: ${result.linksCount || 0}`)
-        }
-      }
-
-      await setClaimParameters(
-        provider as BrowserProvider,
-        faucetAddress,
-        claimAmountBN,
-        startTimestamp,
-        endTimestamp,
-        BigInt(chainId),
-        BigInt(Number(networkId)),
-        faucetType || undefined,
-      )
-
-      // ✅ FIXED: Only handle secret code for dropcode faucets
-      if (faucetType === 'dropcode' && backendMode && secretCodeFromBackend) {
-        saveToStorage(`secretCode_${faucetAddress}`, secretCodeFromBackend)
-        setGeneratedSecretCode(secretCodeFromBackend)
-        setShowSecretCodeDialog(true)
-      }
-
-      toast({
-        title: "Drop parameters updated",
-        description: `Parameters updated successfully. ${
-          socialLinksToSend.length > 0 ? `${socialLinksToSend.length} social media links saved. ` : ""
-        }${
-          faucetType === 'dropcode' && backendMode ? "Drop code generated and stored." : ""
-        }`,
-      })
-      
-      // Clear the new social links after successful save
-      setNewSocialLinks([])
-      
-      await loadFaucetDetails()
-      await loadSocialMediaLinks() // Reload social links
-      await loadTransactionHistory()
-      
-    } catch (error: any) {
-      console.error("Error updating drop parameters:", error)
-      if (error.message === "Switch to the network to perform operation") {
-        checkNetwork()
-      } else {
-        toast({
-          title: "Failed to update drop parameters",
-          description: error.message || "Unknown error occurred",
-          variant: "destructive",
-        })
-      }
-    } finally {
-      setIsUpdatingParameters(false)
-    }
+// ✅ UPDATED: handleUpdateClaimParameters for ALL faucet types
+const handleUpdateClaimParameters = async (): Promise<void> => {
+  if (!isConnected || !provider || !chainId) {
+    toast({
+      title: "Wallet not connected",
+      description: "Please connect your wallet and ensure a network is selected",
+      variant: "destructive",
+    })
+    return
   }
+  
+  // For custom faucets, claimAmount is not required, but for others it is
+  if (faucetType !== 'custom' && !claimAmount) {
+    toast({
+      title: "Invalid Input",
+      description: "Please fill in the drop amount",
+      variant: "destructive",
+    })
+    return
+  }
+  
+  if (!startTime || !endTime) {
+    toast({
+      title: "Invalid Input",
+      description: "Please fill in the start and end times",
+      variant: "destructive",
+    })
+    return
+  }
+  
+  if (startTimeError) {
+    toast({
+      title: "Invalid Start Time",
+      description: startTimeError,
+      variant: "destructive",
+    })
+    return
+  }
+  
+  if (!checkNetwork()) return
+
+  try {
+    setIsUpdatingParameters(true)
+    
+    // For custom faucets, use 0 as claim amount since individual amounts are set separately
+    const claimAmountBN = faucetType === 'custom' ? BigInt(0) : parseUnits(claimAmount, tokenDecimals)
+    const startTimestamp = Math.floor(new Date(startTime).getTime() / 1000)
+    const endTimestamp = Math.floor(new Date(endTime).getTime() / 1000)
+    
+    let secretCodeFromBackend = ""
+    
+    // Prepare social media tasks for ALL faucet types
+    const tasksToSend = newSocialLinks.filter(link => 
+      link.url.trim() && link.handle.trim()
+    ).map(link => ({
+      title: `${link.action.charAt(0).toUpperCase() + link.action.slice(1)} ${link.handle}`,
+      description: `${link.action.charAt(0).toUpperCase() + link.action.slice(1)} our ${link.platform} account: ${link.handle}`,
+      url: link.url.trim(),
+      required: true,
+      platform: link.platform,
+      handle: link.handle,
+      action: link.action
+    }))
+    
+    console.log(`📋 Preparing to send ${tasksToSend.length} social media tasks for ${faucetType} faucet`)
+    
+    // Handle backend communication for ALL faucet types
+    if (faucetType === 'dropcode' && backendMode) {
+      // Dropcode faucets in backend mode - generates secret code + stores tasks
+      console.log("🔐 Dropcode faucet - generating secret code and storing tasks")
+      
+      const response = await fetch("https://fauctdrop-backend.onrender.com/set-claim-parameters", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          faucetAddress,
+          claimAmount: claimAmountBN.toString(),
+          startTime: startTimestamp,
+          endTime: endTimestamp,
+          chainId: Number(chainId),
+          tasks: tasksToSend
+        }),
+      })
+      
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.detail || "Failed to set drop parameters")
+      }
+      
+      const result = await response.json()
+      secretCodeFromBackend = result.secretCode
+      
+      console.log(`✅ Dropcode: Secret code generated, ${result.tasksStored || 0} tasks stored`)
+      
+    } else {
+      // For ALL other faucet types (droplist, custom, dropcode in manual mode)
+      console.log(`📝 ${faucetType} faucet - storing tasks via add-faucet-tasks endpoint`)
+      
+      if (tasksToSend.length > 0) {
+        try {
+          const response = await fetch("https://fauctdrop-backend.onrender.com/add-faucet-tasks", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              faucetAddress,
+              tasks: tasksToSend,
+              userAddress: address,
+              chainId: Number(chainId)
+            }),
+          })
+          
+          if (response.ok) {
+            const result = await response.json()
+            console.log(`✅ ${faucetType}: ${result.tasksAdded || 0} tasks stored successfully`)
+          } else {
+            const errorData = await response.json()
+            console.warn(`⚠️ Failed to store tasks for ${faucetType} faucet:`, errorData.detail)
+          }
+        } catch (taskError) {
+          console.warn(`⚠️ Task storage failed for ${faucetType} faucet:`, taskError.message)
+        }
+      }
+    }
+
+    // Save custom X post template only if it's been modified from default
+if (customXPostTemplate && customXPostTemplate.trim()) {
+  const defaultTemplate = `I just received a drop of {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
+  
+  // Only save if it's different from the default
+  if (customXPostTemplate !== defaultTemplate) {
+    try {
+      console.log("💾 Saving custom X post template...")
+      await saveCustomXPostTemplate()
+    } catch (templateError) {
+      console.warn("⚠️ Failed to save X post template, continuing with parameter update:", templateError)
+      // Don't fail the entire operation if template save fails
+    }
+  } else {
+    console.log("📝 Template is default, not saving")
+  }
+}
+
+    // Continue with blockchain transaction for ALL faucet types
+    await setClaimParameters(
+      provider as BrowserProvider,
+      faucetAddress,
+      claimAmountBN,
+      startTimestamp,
+      endTimestamp,
+      BigInt(chainId),
+      BigInt(Number(networkId)),
+      faucetType || undefined,
+    )
+
+    // Handle secret code display only for dropcode faucets
+    if (faucetType === 'dropcode' && backendMode && secretCodeFromBackend) {
+      saveToStorage(`secretCode_${faucetAddress}`, secretCodeFromBackend)
+      setGeneratedSecretCode(secretCodeFromBackend)
+      setShowSecretCodeDialog(true)
+    }
+
+    // Success message for ALL faucet types
+    const taskMessage = tasksToSend.length > 0 ? `${tasksToSend.length} social media tasks saved. ` : ""
+    const secretMessage = faucetType === 'dropcode' && backendMode ? "Drop code generated and stored. " : ""
+    const templateMessage = customXPostTemplate && customXPostTemplate.trim() ? "Custom X post template saved. " : ""
+    
+    toast({
+      title: "Drop parameters updated",
+      description: `Parameters updated successfully. ${taskMessage}${secretMessage}${templateMessage}`,
+    })
+    
+    // Clear the new social links after successful save
+    setNewSocialLinks([])
+    
+    await loadFaucetDetails()
+    await loadSocialMediaLinks()
+    await loadCustomXPostTemplate() // Reload the template to confirm save
+    await loadTransactionHistory()
+    
+  } catch (error: any) {
+    console.error("Error updating drop parameters:", error)
+    if (error.message === "Switch to the network to perform operation") {
+      checkNetwork()
+    } else {
+      toast({
+        title: "Failed to update drop parameters",
+        description: error.message || "Unknown error occurred",
+        variant: "destructive",
+      })
+    }
+  } finally {
+    setIsUpdatingParameters(false)
+  }
+}
 
   // Load social media links when component mounts
   useEffect(() => {
@@ -1967,20 +2234,20 @@ const handleStartTimeChange = (e) => {
 
   // ✅ Load faucet details when component mounts or dependencies change
   useEffect(() => {
+  if (faucetAddress) {
+    loadSocialMediaLinks()
+    loadCustomXPostTemplate() 
+  }
+}, [faucetAddress])
+  
+  useEffect(() => {
     if (provider && faucetAddress && networkId) {
       loadFaucetDetails()
     }
   }, [provider, faucetAddress, networkId, address])
 
   if (loading) {
-    return (
-      <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8 flex justify-center items-center min-h-[50vh]">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-4 text-sm sm:text-base">Loading faucet details...</p>
-        </div>
-      </div>
-    )
+    return <LoadingPage />
   }
 
   return (
@@ -2458,142 +2725,342 @@ const handleStartTimeChange = (e) => {
 
     {/* ✅ NEW: Social Media Tasks Section */}
     <div className="space-y-4 border-t pt-4">
-      <div className="flex items-center justify-between">
-        <Label className="text-xs sm:text-sm font-medium">
-          Social Media Tasks (Optional)
-        </Label>
+  <div className="flex items-center justify-between">
+    <div>
+      <Label className="text-xs sm:text-sm font-medium">
+        Social Media Tasks (Optional)
+      </Label>
+      <p className="text-xs text-muted-foreground mt-1">
+        Add social media tasks for {faucetType === 'dropcode' ? 'Drop Code' : faucetType === 'droplist' ? 'Drop List' : 'Custom'} faucet verification
+      </p>
+    </div>
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={addNewSocialLink}
+      className="text-xs hover:bg-accent hover:text-accent-foreground"
+    >
+      <ExternalLink className="h-3 w-3 mr-1" />
+      Add Task
+    </Button>
+  </div>
+  
+  {/* ✅ Show current tasks for ALL faucet types */}
+  {dynamicTasks.length > 0 && (
+    <div className="space-y-2">
+      <Label className="text-xs font-medium">Current Tasks ({dynamicTasks.length})</Label>
+      <div className="space-y-1">
+        {dynamicTasks.map((task, index) => (
+          <div key={index} className="flex items-center justify-between p-2 bg-muted rounded text-xs">
+            <span>{getPlatformIcon(task.platform)} {getActionText(task.platform)} {task.handle}</span>
+            <Badge variant="outline" className="text-xs">{task.platform}</Badge>
+          </div>
+        ))}
+      </div>
+    </div>
+  )}
+  
+  {newSocialLinks.length > 0 && (
+    <div className="space-y-3">
+      <Label className="text-xs font-medium">New Tasks</Label>
+      {newSocialLinks.map((link, index) => (
+        <div key={index} className="border rounded-lg p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-medium">Task {index + 1}</Label>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => removeNewSocialLink(index)}
+              className="text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Platform</Label>
+              <Select
+                value={link.platform}
+                onValueChange={(value) => updateNewSocialLink(index, 'platform', value)}
+              >
+                <SelectTrigger className="text-xs">
+                  <SelectValue placeholder="Select platform" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="𝕏">Twitter/𝕏</SelectItem>
+                  <SelectItem value="telegram">Telegram</SelectItem>
+                  <SelectItem value="discord">Discord</SelectItem>
+                  <SelectItem value="youtube">YouTube</SelectItem>
+                  <SelectItem value="instagram">Instagram</SelectItem>
+                  <SelectItem value="tiktok">TikTok</SelectItem>
+                  <SelectItem value="facebook">Facebook</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Action</Label>
+              <Select
+                value={link.action}
+                onValueChange={(value) => updateNewSocialLink(index, 'action', value)}
+              >
+                <SelectTrigger className="text-xs">
+                  <SelectValue placeholder="Select action" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="follow">Follow</SelectItem>
+                  <SelectItem value="subscribe">Subscribe</SelectItem>
+                  <SelectItem value="join">Join</SelectItem>
+                  <SelectItem value="like">Like</SelectItem>
+                  <SelectItem value="retweet">Retweet</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">URL</Label>
+            <Input
+              placeholder="https://x.com/username"
+              value={link.url}
+              onChange={(e) => updateNewSocialLink(index, 'url', e.target.value)}
+              className="text-xs"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Handle/Username</Label>
+            <Input
+              placeholder="@username"
+              value={link.handle}
+              onChange={(e) => updateNewSocialLink(index, 'handle', e.target.value)}
+              className="text-xs"
+            />
+          </div>
+        </div>
+      ))}
+    </div>
+  )}
+</div>
+{/* Custom X Post Template Section */}
+<div className="space-y-4 border-t pt-4">
+  <div className="flex items-center justify-between">
+    <div>
+      <Label className="text-xs sm:text-sm font-medium">
+        Custom Share on 𝕏 Post
+      </Label>
+      <p className="text-xs text-muted-foreground mt-1">
+        Customize what users share when they claim. Use placeholders: {"{amount}"}, {"{token}"}, {"{network}"}, {"{faucet}"}, {"{explorer}"}
+      </p>
+    </div>
+  </div>
+  
+  {isLoadingXTemplate ? (
+    <div className="flex items-center justify-center py-4">
+      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+      <span className="ml-2 text-xs text-muted-foreground">Loading template...</span>
+    </div>
+  ) : (
+    <>
+      <div className="space-y-2">
+        <Textarea
+          placeholder="I just received a drop of {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}"
+          value={customXPostTemplate}
+          onChange={(e) => setCustomXPostTemplate(e.target.value)}
+          rows={4}
+          className="text-xs font-mono"
+        />
+        
+        <div className="flex flex-wrap gap-1">
+          <span className="text-xs text-muted-foreground mr-2">Quick insert:</span>
+          <Badge 
+            variant="outline" 
+            className="text-xs cursor-pointer hover:bg-accent" 
+            onClick={() => setCustomXPostTemplate(customXPostTemplate + "{amount}")}
+          >
+            {"{amount}"}
+          </Badge>
+          <Badge 
+            variant="outline" 
+            className="text-xs cursor-pointer hover:bg-accent"
+            onClick={() => setCustomXPostTemplate(customXPostTemplate + "{token}")}
+          >
+            {"{token}"}
+          </Badge>
+          <Badge 
+            variant="outline" 
+            className="text-xs cursor-pointer hover:bg-accent"
+            onClick={() => setCustomXPostTemplate(customXPostTemplate + "{network}")}
+          >
+            {"{network}"}
+          </Badge>
+          <Badge 
+            variant="outline" 
+            className="text-xs cursor-pointer hover:bg-accent"
+            onClick={() => setCustomXPostTemplate(customXPostTemplate + "{faucet}")}
+          >
+            {"{faucet}"}
+          </Badge>
+          <Badge 
+            variant="outline" 
+            className="text-xs cursor-pointer hover:bg-accent"
+            onClick={() => setCustomXPostTemplate(customXPostTemplate + "{explorer}")}
+          >
+            {"{explorer}"}
+          </Badge>
+        </div>
+        
+        {customXPostTemplate && (
+          <div className="p-3 bg-muted rounded-lg">
+            <Label className="text-xs font-medium mb-2 block">Preview:</Label>
+            <p className="text-xs break-words">
+              {generateXPostContent(
+                faucetDetails?.claimAmount 
+                  ? formatUnits(faucetDetails.claimAmount, tokenDecimals)
+                  : "0",
+                "0x1234567890abcdef1234567890abcdef12345678"
+              )}
+            </p>
+          </div>
+        )}
+      </div>
+      
+      <div className="flex gap-2">
         <Button
           type="button"
           variant="outline"
           size="sm"
-          onClick={addNewSocialLink}
-          className="text-xs hover:bg-accent hover:text-accent-foreground"
+          onClick={() => {
+            // Reset to default template
+            const defaultTemplate = `I just received a drop of {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
+            setCustomXPostTemplate(defaultTemplate)
+            toast({
+              title: "Template Reset",
+              description: "Reset to default share message",
+            })
+          }}
+          className="text-xs"
         >
-          <ExternalLink className="h-3 w-3 mr-1" />
-          Add Task
+          Reset to Default
         </Button>
+        
+        {customXPostTemplate !== `I just received a drop of {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}` && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setCustomXPostTemplate("")
+              toast({
+                title: "Template Cleared",
+                description: "Template cleared, will reset to default on reload",
+              })
+            }}
+            className="text-xs text-red-600 hover:text-red-700"
+          >
+            Clear All
+          </Button>
+        )}
       </div>
-      <p className="text-xs text-muted-foreground">
-        Add social media tasks that users must complete before claiming tokens. Leave empty for no verification requirements.
-      </p>
-      
-      {newSocialLinks.length > 0 && (
-        <div className="space-y-3">
-          {newSocialLinks.map((link, index) => (
-            <div key={index} className="border rounded-lg p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-medium">Task {index + 1}</Label>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => removeNewSocialLink(index)}
-                  className="text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">Platform</Label>
-                  <Select
-                    value={link.platform}
-                    onValueChange={(value) => updateNewSocialLink(index, 'platform', value)}
-                  >
-                    <SelectTrigger className="text-xs">
-                      <SelectValue placeholder="Select platform" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="twitter">Twitter/X</SelectItem>
-                      <SelectItem value="telegram">Telegram</SelectItem>
-                      <SelectItem value="discord">Discord</SelectItem>
-                      <SelectItem value="youtube">YouTube</SelectItem>
-                      <SelectItem value="instagram">Instagram</SelectItem>
-                      <SelectItem value="tiktok">TikTok</SelectItem>
-                      <SelectItem value="facebook">Facebook</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Action</Label>
-                  <Select
-                    value={link.action}
-                    onValueChange={(value) => updateNewSocialLink(index, 'action', value)}
-                  >
-                    <SelectTrigger className="text-xs">
-                      <SelectValue placeholder="Select action" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="follow">Follow</SelectItem>
-                      <SelectItem value="subscribe">Subscribe</SelectItem>
-                      <SelectItem value="join">Join</SelectItem>
-                      <SelectItem value="like">Like</SelectItem>
-                      <SelectItem value="retweet">Retweet</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">URL</Label>
-                <Input
-                  placeholder="https://twitter.com/username"
-                  value={link.url}
-                  onChange={(e) => updateNewSocialLink(index, 'url', e.target.value)}
-                  className="text-xs"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Handle/Username</Label>
-                <Input
-                  placeholder="@username"
-                  value={link.handle}
-                  onChange={(e) => updateNewSocialLink(index, 'handle', e.target.value)}
-                  className="text-xs"
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
+    </>
+  )}
+</div>
+   <div className="flex flex-col gap-3 sm:gap-4 w-full max-w-3xl mx-auto">
+  <Button
+    onClick={handleUpdateClaimParameters}
+    className="text-xs sm:text-sm font-medium py-2 sm:py-3 px-4 sm:px-6 hover:bg-accent hover:text-accent-foreground transition-colors w-full"
+    disabled={isUpdatingParameters || (faucetType !== 'custom' && !claimAmount) || !startTime || !endTime || startTimeError}
+  >
+    {isUpdatingParameters ? (
+      <span className="flex items-center justify-center">
+        <div className="animate-spin rounded-full h-4 w-4 sm:h-5 sm:w-5 border-b-2 border-current mr-2"></div>
+        Updating...
+      </span>
+    ) : (
+      "Update Parameters"
+    )}
+  </Button>
 
-    <div className="flex flex-col sm:flex-row gap-2">
+  {/* Extended access for secret code button */}
+  {shouldShowSecretCodeButton() && (
+    <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 w-full">
       <Button
-        onClick={handleUpdateClaimParameters}
-        className="text-xs sm:text-sm flex-1 hover:bg-accent hover:text-accent-foreground"
-        disabled={isUpdatingParameters || (faucetType !== 'custom' && !claimAmount) || !startTime || !endTime || startTimeError}
+        onClick={handleRetrieveSecretCode}
+        variant="outline"
+        className="text-xs sm:text-sm font-medium py-2 sm:py-3 px-4 sm:px-6 hover:bg-accent hover:text-accent-foreground transition-colors w-full"
+        disabled={isRetrievingSecret}
       >
-        {isUpdatingParameters ? (
-          <span className="flex items-center">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2"></div>
-            Updating...
+        {isRetrievingSecret ? (
+          <span className="flex items-center justify-center">
+            <div className="animate-spin rounded-full h-4 w-4 sm:h-5 sm:w-5 border-b-2 border-current mr-2"></div>
+            Retrieving...
           </span>
         ) : (
-          "Update Parameters"
+          <>
+            <Key className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+            Get Current Code
+          </>
         )}
       </Button>
-      {/* ✅ UPDATED: Extended access for secret code button */}
-      {shouldShowSecretCodeButton() && (
-        <Button
-          onClick={handleRetrieveSecretCode}
-          variant="outline"
-          className="text-xs sm:text-sm hover:bg-accent hover:text-accent-foreground"
-          disabled={isRetrievingSecret}
-        >
-          {isRetrievingSecret ? (
-            <span className="flex items-center">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2"></div>
-              Retrieving...
-            </span>
-          ) : (
-            <>
-              <Key className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
-              Get Current Code
-            </>
-          )}
-        </Button>
-      )}
+
+      {/* Generate New Code Button */}
+      <Button
+        onClick={handleGenerateNewDropCode}
+        variant="outline"
+        className="text-xs sm:text-sm font-medium py-2 sm:py-3 px-4 sm:px-6 hover:bg-accent hover:text-accent-foreground transition-colors w-full"
+        disabled={isGeneratingNewCode}
+      >
+        {isGeneratingNewCode ? (
+          <span className="flex items-center justify-center">
+            <div className="animate-spin rounded-full h-4 w-4 sm:h-5 sm:w-5 border-b-2 border-current mr-2"></div>
+            Generating...
+          </span>
+        ) : (
+          <>
+            <RotateCcw className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+            Generate New Code
+          </>
+        )}
+      </Button>
     </div>
+  )}
+</div>
+
+
+<Dialog open={showNewCodeDialog} onOpenChange={setShowNewCodeDialog}>
+  <DialogContent className="w-11/12 max-w-[95vw] sm:max-w-md">
+    <DialogHeader>
+      <DialogTitle className="text-lg sm:text-xl">New Drop Code Generated</DialogTitle>
+      <DialogDescription className="text-xs sm:text-sm">
+        Your new drop code has been generated and stored. The previous code is no longer valid.
+      </DialogDescription>
+    </DialogHeader>
+    <div className="space-y-4 py-4">
+      <div className="text-center">
+        <div className="text-xl sm:text-2xl font-mono font-bold bg-gray-100 dark:bg-gray-800 p-4 rounded-lg">
+          {newlyGeneratedCode}
+        </div>
+      </div>
+      <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-lg">
+        <p className="text-xs text-yellow-800 dark:text-yellow-200 text-center">
+          ⚠️ Important: The previous drop code is now invalid. Only this new code will work for claims.
+        </p>
+      </div>
+      <p className="text-xs text-muted-foreground text-center">
+        Share this new code with users to allow them to drop tokens. Keep it safe and share it only with intended users.
+      </p>
+    </div>
+    <DialogFooter>
+      <Button
+        onClick={() => handleCopySecretCode(newlyGeneratedCode)}
+        className="text-xs sm:text-sm w-full hover:bg-accent hover:text-accent-foreground"
+      >
+        <Copy className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
+        Copy New Code
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
+
   </div>
 </TabsContent>
                       {/* ✅ Whitelist Tab - Only shown for droplist faucets */}
@@ -2874,8 +3341,8 @@ const handleStartTimeChange = (e) => {
       
       {/* ✅ Updated Follow Dialog with Dynamic Tasks */}
       <Dialog open={showFollowDialog} onOpenChange={setShowFollowDialog}>
-        <DialogContent className="w-11/12 max-w-[95vw] sm:max-w-lg">
-          <DialogHeader>
+        <DialogContent className="w-11/12 max-w-[95vw] sm:max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle className="text-lg sm:text-xl">Complete Required Tasks</DialogTitle>
             <DialogDescription className="text-xs sm:text-sm">
               {dynamicTasks.length > 0 
@@ -2884,7 +3351,7 @@ const handleStartTimeChange = (e) => {
               }
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4 overflow-y-auto flex-1 min-h-0">
             {isLoadingSocialLinks ? (
               <div className="text-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
@@ -2959,7 +3426,7 @@ const handleStartTimeChange = (e) => {
             )}
           </div>
          
-          <DialogFooter>
+          <DialogFooter className="flex-shrink-0">
             <Button
               onClick={handleVerifyAllTasks}
               className="text-xs sm:text-sm w-full hover:bg-accent hover:text-accent-foreground"

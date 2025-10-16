@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { WalletConnect } from "@/components/wallet-connect";
+import { WalletConnectButton } from "@/components/wallet-connect";
 import { NetworkSelector } from "@/components/network-selector";
 import Link from "next/link";
 import { Menu, X } from "lucide-react";
@@ -56,7 +56,7 @@ export function Header({ pageTitle }: { pageTitle: string }) {
           <Link href="/" className="text-xs sm:text-sm hover:underline">
             Back to Networks
           </Link>
-          <WalletConnect />
+          <WalletConnectButton />
         </div>
       </div>
 
@@ -66,7 +66,7 @@ export function Header({ pageTitle }: { pageTitle: string }) {
         <Link href="/" className="text-xs sm:text-sm hover:underline">
           Back to Networks
         </Link>
-        <WalletConnect />
+        <WalletConnectButton />
       </div>
     </header>
   );

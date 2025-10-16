@@ -27,7 +27,7 @@ function saveToLocalStorage(key: string, data: any) {
       localStorage.setItem(key, JSON.stringify(data, (k, v) => 
         typeof v === 'bigint' ? v.toString() : v
       ));
-    }
+    } 
   } catch (error) {
     console.warn('Failed to save to localStorage:', error);
   }
