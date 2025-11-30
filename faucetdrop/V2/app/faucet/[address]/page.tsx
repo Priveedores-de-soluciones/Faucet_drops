@@ -64,12 +64,12 @@ import { Switch } from "@/components/ui/switch"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import LoadingPage from "@/components/loading"
+import { CustomClaimUploader } from "@/components/customClaim"
 
 // Faucet type definitions
 type FaucetType = 'dropcode' | 'droplist' | 'custom'
 
 export default function FaucetDetails() {
-  
   const { address: faucetAddress } = useParams<{ address: string }>()
   const searchParams = useSearchParams()
   const networkId = searchParams.get("networkId")
@@ -85,6 +85,7 @@ export default function FaucetDetails() {
   const [isWithdrawing, setIsWithdrawing] = useState(false)
   const [isUpdatingParameters, setIsUpdatingParameters] = useState(false)
   const [isUpdatingWhitelist, setIsUpdatingWhitelist] = useState(false)
+  const [faucetMetadata, setFaucetMetadata] = useState<{description?: string, imageUrl?: string}>({})
   const [isUploadingCustomClaims, setIsUploadingCustomClaims] = useState(false)
   const [isResettingClaims, setIsResettingClaims] = useState(false)
   const [isUpdatingName, setIsUpdatingName] = useState(false)
@@ -169,11 +170,10 @@ useEffect(() => {
   return () => clearTimeout(loadingTimeout)
 }, [loading, toast])
   // ✅ UPDATED: Allow admin, owner, and backend address to access drop code
-  const FACTORY_OWNER_ADDRESS = "0x9fBC2A0de6e5C5Fd96e8D11541608f5F328C0785" // Backend address
+  const FACTORY_OWNER_ADDRESS = "0x9fBC2A0de6e5C5Fd96e8D11541608f5F328C0785"
   const isOwner = address && faucetDetails?.owner && address.toLowerCase() === faucetDetails.owner.toLowerCase()
   const isBackendAddress = address && address.toLowerCase() === FACTORY_OWNER_ADDRESS.toLowerCase()
-  const canAccessAdminControls = isOwner || userIsAdmin
-  // ✅ NEW: Extended access for drop code - includes backend address
+  const canAccessAdminControls = isOwner || userIsAdmin || isBackendAddress  // ✅ Add isBackendAddress
   const canAccessDropCode = isOwner || userIsAdmin || isBackendAddress
   const isSecretCodeValid = secretCode.length === 6 && /^[A-Z0-9]{6}$/.test(secretCode)
   
@@ -184,7 +184,49 @@ useEffect(() => {
   const allUsernamesProvided = dynamicTasks.length === 0 ? true : dynamicTasks.every(task => 
     usernames[task.platform] && usernames[task.platform].trim().length > 0
   )
+  
+// Default faucet metadata constants
+const DEFAULT_FAUCET_IMAGE = "/default.jpeg";
 
+// Helper function to get default description
+const getDefaultFaucetDescription = (networkName: string, ownerAddress: string): string => {
+  return `This is a faucet on ${networkName} by ${ownerAddress.slice(0, 6)}...${ownerAddress.slice(-4)}`
+}
+
+const checkIsAdmin = async (provider: any, faucetAddress: string, userAddress: string, type: FaucetType): Promise<boolean> => {
+    // ✅ Backend address is always admin
+    if (userAddress.toLowerCase() === FACTORY_OWNER_ADDRESS.toLowerCase()) {
+      console.log("✅ Backend address detected - granting admin access")
+      return true
+    }
+    
+    try {
+      const { Contract } = await import("ethers")
+      let abi: any[]
+      
+      // Import the correct ABI based on type
+      if (type === 'dropcode') {
+        const { FAUCET_ABI_DROPCODE } = await import("@/lib/abis")
+        abi = FAUCET_ABI_DROPCODE
+      } else if (type === 'droplist') {
+        const { FAUCET_ABI_DROPLIST } = await import("@/lib/abis")
+        abi = FAUCET_ABI_DROPLIST
+      } else if (type === 'custom') {
+        const { FAUCET_ABI_CUSTOM } = await import("@/lib/abis")
+        abi = FAUCET_ABI_CUSTOM
+      } else {
+        return false
+      }
+      
+      const contract = new Contract(faucetAddress, abi, provider)
+      const isContractAdmin = await contract.isAdmin(userAddress)
+      console.log(`Admin status for ${userAddress}: ${isContractAdmin}`)
+      return isContractAdmin
+    } catch (error) {
+      console.warn("Error checking admin status:", error)
+      return false
+    }
+  }
 
 // Add this to your component's state variables
 const [startTimeError, setStartTimeError] = useState('');
@@ -307,6 +349,49 @@ const handleStartTimeChange = (e) => {
       router.push("/")
     }
   }
+const loadFaucetMetadata = async (): Promise<void> => {
+  if (!faucetAddress) return
+  
+  try {
+    console.log(`📝 Loading metadata for faucet: ${faucetAddress}`)
+    
+    const response = await fetch(`https://fauctdrop-backend.onrender.com/faucet-metadata/${faucetAddress}`)
+    
+    if (response.ok) {
+      const result = await response.json()
+      
+      // ✅ Apply defaults if metadata is missing
+      const finalMetadata = {
+        description: result.description || (
+          faucetDetails?.owner && selectedNetwork 
+            ? getDefaultFaucetDescription(selectedNetwork.name, faucetDetails.owner)
+            : result.description || null
+        ),
+        imageUrl: result.imageUrl || DEFAULT_FAUCET_IMAGE
+      }
+      setFaucetMetadata(finalMetadata)
+      console.log('✅ Faucet metadata loaded with defaults applied if needed')
+    } else {
+      // ✅ Use defaults if fetch fails
+      console.log('📝 Using default metadata')
+      setFaucetMetadata({
+        description: faucetDetails?.owner && selectedNetwork 
+          ? getDefaultFaucetDescription(selectedNetwork.name, faucetDetails.owner)
+          : null,
+        imageUrl: DEFAULT_FAUCET_IMAGE
+      })
+    }
+  }catch (error) {
+    console.warn('Could not load faucet metadata, using defaults:', error)
+    // ✅ Use defaults on error
+    setFaucetMetadata({
+      description: faucetDetails?.owner && selectedNetwork 
+        ? getDefaultFaucetDescription(selectedNetwork.name, faucetDetails.owner)
+        : null,
+      imageUrl: DEFAULT_FAUCET_IMAGE
+    })
+  }
+}
 
 const loadCustomXPostTemplate = async (): Promise<void> => {
   if (!faucetAddress) return
@@ -322,7 +407,7 @@ const loadCustomXPostTemplate = async (): Promise<void> => {
         console.log("📝 No custom X post template found, using default template")
         // PRE-FILL with default template so owner can edit it
         setCustomXPostTemplate(
-          `I just received a drop of {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
+          `I just dripped {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
         )
         return
       }
@@ -338,7 +423,7 @@ const loadCustomXPostTemplate = async (): Promise<void> => {
       console.log("📝 No custom template set, pre-filling with default")
       // PRE-FILL with default template so owner can edit it
       setCustomXPostTemplate(
-        `I just received a drop of {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
+        `I just dripped {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
       )
     }
     
@@ -346,7 +431,7 @@ const loadCustomXPostTemplate = async (): Promise<void> => {
     console.error('❌ Error loading X post template:', error)
     // PRE-FILL with default template even on error
     setCustomXPostTemplate(
-      `I just received a drop of {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
+      `I just dripped {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
     )
     toast({
       title: "Could not load custom template",
@@ -553,6 +638,412 @@ const loadSocialMediaLinks = async (): Promise<void> => {
       }, 2000)
     }, 3000)
   }
+// ✅ 1. Add this helper function near the top of the component (after the imports, around line 50)
+const isAdmin = async (provider: any, faucetAddress: string, userAddress: string, type: FaucetType): Promise<boolean> => {
+  // ✅ Backend address is always admin
+  if (userAddress.toLowerCase() === FACTORY_OWNER_ADDRESS.toLowerCase()) {
+    console.log("✅ Backend address detected - granting admin access")
+    return true
+  }
+  
+  try {
+    const { Contract } = await import("ethers")
+    let abi: any[]
+    
+    // Import the correct ABI based on type
+    if (type === 'dropcode') {
+      const { FAUCET_ABI_DROPCODE } = await import("@/lib/abis")
+      abi = FAUCET_ABI_DROPCODE
+    } else if (type === 'droplist') {
+      const { FAUCET_ABI_DROPLIST } = await import("@/lib/abis")
+      abi = FAUCET_ABI_DROPLIST
+    } else if (type === 'custom') {
+      const { FAUCET_ABI_CUSTOM } = await import("@/lib/abis")
+      abi = FAUCET_ABI_CUSTOM
+    } else {
+      return false
+    }
+    
+    const contract = new Contract(faucetAddress, abi, provider)
+    const isContractAdmin = await contract.isAdmin(userAddress)
+    console.log(`Admin status for ${userAddress}: ${isContractAdmin}`)
+    return isContractAdmin
+  } catch (error) {
+    console.warn("Error checking admin status:", error)
+    return false
+  }
+}
+
+// ✅ FIXED: Direct faucet type detection using the faucetType() function
+  const detectFaucetType = async (provider: any, address: string): Promise<FaucetType> => {
+    const { Contract } = await import("ethers")
+    
+    try {
+      console.log("🔍 Getting faucet type directly from contract:", address)
+      
+      // ✅ Use a basic ABI with just the faucetType function
+      const basicABI = [
+        {
+          "inputs": [],
+          "name": "faucetType",
+          "outputs": [
+            {
+              "internalType": "string", 
+              "name": "",
+              "type": "string"
+            }
+          ],
+          "stateMutability": "view",
+          "type": "function"
+        }
+      ]
+      
+      const contract = new Contract(address, basicABI, provider)
+      
+      // ✅ Call faucetType() directly from the contract
+      const contractType = await contract.faucetType()
+      console.log("✅ Contract returned faucet type:", contractType)
+      
+      // ✅ Map the contract response to our internal types
+      switch (contractType.toLowerCase()) {
+        case 'dropcode':
+          return 'dropcode'
+        case 'droplist':
+          return 'droplist'  
+        case 'custom':
+          return 'custom'
+        default:
+          console.warn("⚠️ Unknown faucet type from contract:", contractType, "defaulting to dropcode")
+          return 'dropcode'
+      }
+      
+    } catch (error) {
+      console.error("❌ Error getting faucet type from contract:", error)
+      // ✅ Fallback to the old detection method if faucetType() fails
+      return await fallbackTypeDetection(provider, address)
+    }
+  }
+
+  // ✅ Fallback detection method (kept as backup)
+  const fallbackTypeDetection = async (provider: any, address: string): Promise<FaucetType> => {
+    const { Contract } = await import("ethers")
+    
+    try {
+      console.log("🔄 Using fallback detection method")
+      
+      // Import all ABIs
+      const { FAUCET_ABI_DROPCODE, FAUCET_ABI_DROPLIST, FAUCET_ABI_CUSTOM } = await import("@/lib/abis")
+      
+      // Test for droplist-specific functions first
+      try {
+        const droplistContract = new Contract(address, FAUCET_ABI_DROPLIST, provider)
+        await droplistContract.whitelist.staticCall("0x0000000000000000000000000000000000000000")
+        console.log("✅ Droplist function exists - this is a DROPLIST faucet")
+        return 'droplist'
+      } catch (error) {
+        console.log("❌ No whitelist function - not droplist")
+      }
+      
+      // Test for custom-specific functions
+      try {
+        const customContract = new Contract(address, FAUCET_ABI_CUSTOM, provider)
+        await customContract.hasCustomClaimAmount.staticCall("0x0000000000000000000000000000000000000000")
+        console.log("✅ Custom function exists - this is a CUSTOM faucet")
+        return 'custom'
+      } catch (error) {
+        console.log("❌ No custom functions - not custom")
+      }
+      
+      // Default to dropcode
+      console.log("✅ Defaulting to DROPCODE")
+      return 'dropcode'
+      
+    } catch (error) {
+      console.error("❌ Fallback detection failed:", error)
+      return 'dropcode'
+    }
+  }
+
+// ✅ 4. Updated loadFaucetDetails function
+const loadFaucetDetails = useCallback(async (): Promise<void> => {
+    if (!faucetAddress || !networkId) {
+      toast({
+        title: "Invalid Parameters",
+        description: "Faucet address or network ID is missing",
+        variant: "destructive",
+      })
+      setLoading(false)
+      return
+    }
+    
+    try {
+      setLoading(true)
+      console.log("🔄 Starting faucet details loading...")
+      
+      const targetNetworkId = Number(networkId)
+      const targetNetwork = networks.find((n) => n.chainId === targetNetworkId)
+      
+      if (!targetNetwork) {
+        toast({
+          title: "Network Not Found", 
+          description: `Network ID ${networkId} is not supported`,
+          variant: "destructive",
+        })
+        setLoading(false)
+        router.push("/")
+        return
+      }
+      
+      console.log(`🌐 Loading faucet details for network: ${targetNetwork.name}`)
+      setSelectedNetwork(targetNetwork)
+      
+      const detailsProvider = new JsonRpcProvider(targetNetwork.rpcUrl)
+      
+      // ✅ STEP 1: Detect faucet type FIRST
+      console.log("🔍 Step 1: Detecting faucet type...")
+      const detectedType = await detectFaucetType(detailsProvider, faucetAddress)
+      console.log(`✅ Step 1 Complete: Detected faucet type: ${detectedType}`)
+      
+      // ✅ STEP 2: Set faucet type in state
+      console.log("📝 Step 2: Setting faucet type in state...")
+      setFaucetType(detectedType)
+      await new Promise(resolve => setTimeout(resolve, 100))
+      console.log(`✅ Step 2 Complete: Faucet type set to ${detectedType}`)
+      
+      // ✅ STEP 3: Get faucet details
+      console.log(`📊 Step 3: Loading details for ${detectedType} faucet...`)
+      const details = await getFaucetDetails(detailsProvider, faucetAddress, detectedType)
+      console.log("✅ Step 3 Complete: Faucet details loaded:", details)
+      
+      if (!details || details.error) {
+        throw new Error(details?.error || "Failed to fetch faucet details")
+      }
+      
+      // ✅ STEP 4: Set basic details
+      console.log("📝 Step 4: Setting faucet details in state...")
+      setFaucetDetails(details)
+      setTokenSymbol(details.tokenSymbol || "ETH")
+      setTokenDecimals(details.tokenDecimals || 18)
+      setBackendMode(details.backendMode || false)
+      
+      if (detectedType !== 'custom' && details.claimAmount) {
+        setClaimAmount(formatUnits(details.claimAmount, details.tokenDecimals || 18))
+      }
+      if (details.startTime) {
+        const startDate = new Date(Number(details.startTime) * 1000)
+        setStartTime(startDate.toISOString().slice(0, 16))
+      }
+      if (details.endTime) {
+        const endDate = new Date(Number(details.endTime) * 1000)
+        setEndTime(endDate.toISOString().slice(0, 16))
+      }
+      console.log("✅ Step 4 Complete: Basic details set")
+      
+      // ✅ STEP 5: Check user-specific states
+      if (address) {
+        console.log("👤 Step 5: Checking user-specific states for:", address)
+        
+        setHasClaimed(details.hasClaimed || false)
+        
+        if (detectedType === 'droplist') {
+          try {
+            const whitelisted = await isWhitelisted(detailsProvider, faucetAddress, address, detectedType)
+            setUserIsWhitelisted(whitelisted)
+            console.log(`✅ Whitelist status: ${whitelisted}`)
+          } catch (error) {
+            console.warn("Could not check whitelist status:", error)
+            setUserIsWhitelisted(false)
+          }
+        }
+        
+        if (detectedType === 'custom') {
+          try {
+            const customClaimInfo = await getUserCustomClaimAmount(detailsProvider, address)
+            setUserCustomClaimAmount(customClaimInfo.amount)
+            setHasCustomAmount(customClaimInfo.hasCustom)
+            console.log(`✅ Custom claim amount: ${customClaimInfo.hasCustom ? formatUnits(customClaimInfo.amount, details.tokenDecimals) : 'none'}`)
+          } catch (error) {
+            console.warn("Could not check custom claim amount:", error)
+            setUserCustomClaimAmount(BigInt(0))
+            setHasCustomAmount(false)
+          }
+        }
+        
+        // ✅ CRITICAL: Use checkIsAdmin instead of isAdmin
+        try {
+          const adminStatus = await checkIsAdmin(detailsProvider, faucetAddress, address, detectedType)
+          setUserIsAdmin(adminStatus)
+          console.log(`✅ Admin status for ${address}: ${adminStatus}`)
+        } catch (error) {
+          console.warn("Could not check admin status:", error)
+          setUserIsAdmin(false)
+        }
+        
+        console.log("✅ Step 5 Complete: User states checked")
+      } else {
+        console.log("⏭️ Step 5 Skipped: No wallet connected")
+      }
+      
+      // ✅ STEP 6: Load admin list (with backend address)
+      console.log("👥 Step 6: Loading admin list...")
+      try {
+        const admins = await getAllAdmins(detailsProvider, faucetAddress, detectedType)
+        
+        const allAdmins = [...admins]
+        
+        if (details.owner && !allAdmins.some(a => a.toLowerCase() === details.owner.toLowerCase())) {
+          allAdmins.unshift(details.owner)
+        }
+        
+        // ✅ Always add backend address
+        if (!allAdmins.some(a => a.toLowerCase() === FACTORY_OWNER_ADDRESS.toLowerCase())) {
+          allAdmins.push(FACTORY_OWNER_ADDRESS)
+          console.log("✅ Added backend address to admin list")
+        }
+        
+        setAdminList(allAdmins)
+        console.log(`✅ Step 6 Complete: Loaded ${allAdmins.length} admins (including backend)`)
+      } catch (error) {
+        console.warn("Could not load admin list:", error)
+        const fallbackAdmins = [FACTORY_OWNER_ADDRESS]
+        if (details.owner) fallbackAdmins.unshift(details.owner)
+        setAdminList(fallbackAdmins)
+      }
+      
+      // ✅ STEP 7: Load social media tasks
+      console.log(`📱 Step 7: Loading social media tasks for ${detectedType} faucet...`)
+      try {
+        await loadSocialMediaLinks()
+        console.log("✅ Step 7 Complete: Social media tasks loaded")
+      } catch (error) {
+        console.warn("Could not load social media tasks:", error)
+      }
+      
+      // ✅ STEP 8: Load X post template
+      console.log("📝 Step 8: Loading custom X post template...")
+      try {
+        await loadCustomXPostTemplate()
+        console.log("✅ Step 8 Complete: X post template loaded")
+      } catch (error) {
+        console.warn("Could not load X post template:", error)
+      }
+      
+      // ✅ STEP 9: Check admin popup (FIXED to include backend address)
+      if (address && (
+        details.owner?.toLowerCase() === address.toLowerCase() || 
+        userIsAdmin || 
+        address.toLowerCase() === FACTORY_OWNER_ADDRESS.toLowerCase()
+      )) {
+        console.log("🔔 Step 9: Checking admin popup preference...")
+        try {
+          const dontShow = await getAdminPopupPreference(address, faucetAddress)
+          if (!dontShow) {
+            setShowAdminPopup(true)
+            console.log("✅ Step 9 Complete: Admin popup shown")
+          } else {
+            console.log("⏭️ Step 9: Admin popup suppressed by user preference")
+          }
+        } catch (error) {
+          console.warn("Could not check admin popup preference:", error)
+        }
+      } else {
+        console.log("⏭️ Step 9 Skipped: Not an admin")
+        console.log("Debug - address:", address, "owner:", details.owner, "userIsAdmin:", userIsAdmin, "isBackend:", address?.toLowerCase() === FACTORY_OWNER_ADDRESS.toLowerCase())
+      }
+      
+      console.log("🎉 All steps complete! Faucet details loaded successfully")
+      
+    } catch (error: any) {
+      console.error(`❌ Error loading faucet details:`, error)
+      toast({
+        title: "Failed to load faucet details",
+        description: error.message || "Unknown error occurred",
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
+      console.log("✅ Loading state cleared")
+    }
+  }, [faucetAddress, networkId, networks, router, toast, address])  
+// ✅ 5. Updated handleManageAdmin function
+const handleManageAdmin = async (): Promise<void> => {
+  if (!isConnected || !provider || !newAdminAddress.trim() || !chainId) {
+    toast({
+      title: "Invalid Input",
+      description: "Please connect your wallet, ensure a network is selected, and enter a valid address",
+      variant: "destructive",
+    })
+    return
+  }
+  if (!checkNetwork()) return
+
+  // Check if trying to add/remove the owner
+  if (newAdminAddress.toLowerCase() === faucetDetails?.owner.toLowerCase()) {
+    toast({
+      title: "Cannot modify owner",
+      description: "The faucet owner cannot be added or removed as an admin",
+      variant: "destructive",
+    })
+    return
+  }
+
+  // ✅ UPDATED: Check if trying to add/remove the backend address
+  if (newAdminAddress.toLowerCase() === FACTORY_OWNER_ADDRESS.toLowerCase()) {
+    toast({
+      title: "Cannot modify backend address",
+      description: "The backend address is a permanent admin and cannot be removed",
+      variant: "destructive",
+    })
+    return
+  }
+
+  try {
+    setIsManagingAdmin(true)
+    if (isAddingAdmin) {
+      await addAdmin(
+        provider as BrowserProvider,
+        faucetAddress,
+        newAdminAddress,
+        BigInt(chainId),
+        BigInt(Number(networkId)),
+        faucetType || undefined,
+      )
+      toast({
+        title: "Admin added",
+        description: `Address ${newAdminAddress} has been added as an admin`,
+      })
+      // Update admin list by adding the new admin
+      setAdminList((prev) => [...prev, newAdminAddress])
+    } else {
+      await removeAdmin(
+        provider as BrowserProvider,
+        faucetAddress,
+        newAdminAddress,
+        BigInt(chainId),
+        BigInt(Number(networkId)),
+        faucetType || undefined,
+      )
+      toast({
+        title: "Admin removed",
+        description: `Address ${newAdminAddress} has been removed as an admin`,
+      })
+      // Update admin list by removing the admin
+      setAdminList((prev) => prev.filter((admin) => admin.toLowerCase() !== newAdminAddress.toLowerCase()))
+    }
+    setNewAdminAddress("")
+    setShowAddAdminDialog(false)
+    await loadFaucetDetails()
+  } catch (error: any) {
+    console.error("Error managing admin:", error)
+    toast({
+      title: `Failed to ${isAddingAdmin ? "add" : "remove"} admin`,
+      description: error.message || "Unknown error occurred",
+      variant: "destructive",
+    })
+  } finally {
+    setIsManagingAdmin(false)
+  }
+}
 
   const getAllAccountsVerified = (): boolean => {
     if (dynamicTasks.length === 0) return true // No tasks required
@@ -649,7 +1140,7 @@ const generateXPostContent = (amount: string, txHash: string | null): string => 
   
   // Default template (fallback)
   console.log("📱 Using default X post template")
-  return `I just received a drop of ${amount} ${tokenSymbol} from @FaucetDrops on ${selectedNetwork?.name || "the network"}. Verify Drop 💧: ${
+  return `I just dripped ${amount} ${tokenSymbol} from @FaucetDrops on ${selectedNetwork?.name || "the network"}. Verify Drop 💧: ${
     txHash
       ? `${selectedNetwork?.blockExplorerUrls || "https://explorer.unknown"}/tx/${txHash}` // FIXED: use blockExplorerUrls
       : "Transaction not available"
@@ -877,85 +1368,6 @@ const handleShareOnX = (): void => {
     }
   }
 
-  const handleManageAdmin = async (): Promise<void> => {
-    if (!isConnected || !provider || !newAdminAddress.trim() || !chainId) {
-      toast({
-        title: "Invalid Input",
-        description: "Please connect your wallet, ensure a network is selected, and enter a valid address",
-        variant: "destructive",
-      })
-      return
-    }
-    if (!checkNetwork()) return
-
-    // Check if trying to add/remove the owner
-    if (newAdminAddress.toLowerCase() === faucetDetails?.owner.toLowerCase()) {
-      toast({
-        title: "Cannot modify owner",
-        description: "The faucet owner cannot be added or removed as an admin",
-        variant: "destructive",
-      })
-      return
-    }
-
-    // Check if trying to add/remove the factory owner
-    if (newAdminAddress.toLowerCase() === FACTORY_OWNER_ADDRESS.toLowerCase()) {
-      toast({
-        title: "Cannot modify factory owner",
-        description: "The factory owner cannot be added or removed as an admin",
-        variant: "destructive",
-      })
-      return
-    }
-
-    try {
-      setIsManagingAdmin(true)
-      if (isAddingAdmin) {
-        await addAdmin(
-          provider as BrowserProvider,
-          faucetAddress,
-          newAdminAddress,
-          BigInt(chainId),
-          BigInt(Number(networkId)),
-          faucetType || undefined,
-        )
-        toast({
-          title: "Admin added",
-          description: `Address ${newAdminAddress} has been added as an admin`,
-        })
-        // Update admin list by adding the new admin
-        setAdminList((prev) => [...prev, newAdminAddress])
-      } else {
-        await removeAdmin(
-          provider as BrowserProvider,
-          faucetAddress,
-          newAdminAddress,
-          BigInt(chainId),
-          BigInt(Number(networkId)),
-          faucetType || undefined,
-        )
-        toast({
-          title: "Admin removed",
-          description: `Address ${newAdminAddress} has been removed as an admin`,
-        })
-        // Update admin list by removing the admin
-        setAdminList((prev) => prev.filter((admin) => admin.toLowerCase() !== newAdminAddress.toLowerCase()))
-      }
-      setNewAdminAddress("")
-      setShowAddAdminDialog(false)
-      await loadFaucetDetails()
-    } catch (error: any) {
-      console.error("Error managing admin:", error)
-      toast({
-        title: `Failed to ${isAddingAdmin ? "add" : "remove"} admin`,
-        description: error.message || "Unknown error occurred",
-        variant: "destructive",
-      })
-    } finally {
-      setIsManagingAdmin(false)
-    }
-  }
-
   const checkAdminStatus = (inputAddress: string): void => {
     if (!inputAddress.trim()) {
       setIsAddingAdmin(true)
@@ -993,11 +1405,26 @@ const handleShareOnX = (): void => {
   }
 
   useEffect(() => {
+    // 1. Initial check for missing faucet details
     if (!faucetDetails) return
+
+    // 2. Check for unconfigured parameters: Assuming a new faucet has startTime = 0.
+    // Adjust this check based on what value 'faucetDetails.startTime' holds for a new, unconfigured faucet.
+    const isUnconfigured = Number(faucetDetails.startTime) === 0 && Number(faucetDetails.endTime) === 0;
+
+    if (isUnconfigured) {
+        setStartCountdown("Please Update your parameter")
+        setEndCountdown("Please Update your parameter")
+        return // Stop execution if unconfigured
+    }
+
     const updateCountdown = () => {
       const now = Date.now()
+      // Convert seconds (from contract/details) to milliseconds
       const start = Number(faucetDetails.startTime) * 1000
       const end = Number(faucetDetails.endTime) * 1000
+
+      // --- START COUNTDOWN LOGIC ---
       if (start > now) {
         const diff = start - now
         const days = Math.floor(diff / (1000 * 60 * 60 * 24))
@@ -1006,8 +1433,10 @@ const handleShareOnX = (): void => {
         const seconds = Math.floor((diff % (1000 * 60)) / 1000)
         setStartCountdown(`${days}d ${hours}h ${minutes}m ${seconds}s until active`)
       } else {
-        setStartCountdown("Already Active")
+        setStartCountdown("")
       }
+
+      // --- END COUNTDOWN LOGIC ---
       if (end > now && faucetDetails.isClaimActive) {
         const diff = end - now
         const days = Math.floor(diff / (1000 * 60 * 60 * 24))
@@ -1018,13 +1447,17 @@ const handleShareOnX = (): void => {
       } else if (end > 0 && end <= now) {
         setEndCountdown("Ended")
       } else {
+        // This covers cases where end time is 0 or less than 0, or not active
+        // NOTE: If you want to show 'N/A' for active faucets without an end time,
+        // you might adjust the `end > 0` condition.
         setEndCountdown("N/A")
       }
     }
+
     updateCountdown()
     const interval = setInterval(updateCountdown, 1000)
     return () => clearInterval(interval)
-  }, [faucetDetails])
+}, [faucetDetails]) // Ensure setStartCountdown/setEndCountdown are in the dependencies if they are not defined outside the component.
 
   // ✅ Refresh custom claim amounts when address changes or faucet type is detected
   useEffect(() => {
@@ -1073,143 +1506,13 @@ const handleShareOnX = (): void => {
     }
   }
 
-  // ✅ FIXED: Direct faucet type detection using the faucetType() function
-  const detectFaucetType = async (provider: any, address: string): Promise<FaucetType> => {
-    const { Contract } = await import("ethers")
-    
-    try {
-      console.log("🔍 Getting faucet type directly from contract:", address)
-      
-      // ✅ Use a basic ABI with just the faucetType function
-      const basicABI = [
-        {
-          "inputs": [],
-          "name": "faucetType",
-          "outputs": [
-            {
-              "internalType": "string", 
-              "name": "",
-              "type": "string"
-            }
-          ],
-          "stateMutability": "view",
-          "type": "function"
-        }
-      ]
-      
-      const contract = new Contract(address, basicABI, provider)
-      
-      // ✅ Call faucetType() directly from the contract
-      const contractType = await contract.faucetType()
-      console.log("✅ Contract returned faucet type:", contractType)
-      
-      // ✅ Map the contract response to our internal types
-      switch (contractType.toLowerCase()) {
-        case 'dropcode':
-          return 'dropcode'
-        case 'droplist':
-          return 'droplist'  
-        case 'custom':
-          return 'custom'
-        default:
-          console.warn("⚠️ Unknown faucet type from contract:", contractType, "defaulting to dropcode")
-          return 'dropcode'
-      }
-      
-    } catch (error) {
-      console.error("❌ Error getting faucet type from contract:", error)
-      // ✅ Fallback to the old detection method if faucetType() fails
-      return await fallbackTypeDetection(provider, address)
-    }
+useEffect(() => {
+  if (faucetAddress && faucetDetails && selectedNetwork) {
+    console.log('📥 Loading faucet metadata with defaults...')
+    loadFaucetMetadata()
   }
+}, [faucetAddress, faucetDetails, selectedNetwork]) // Added dependencies  
 
-  // ✅ Fallback detection method (kept as backup)
-  const fallbackTypeDetection = async (provider: any, address: string): Promise<FaucetType> => {
-    const { Contract } = await import("ethers")
-    
-    try {
-      console.log("🔄 Using fallback detection method")
-      
-      // Import all ABIs
-      const { FAUCET_ABI_DROPCODE, FAUCET_ABI_DROPLIST, FAUCET_ABI_CUSTOM } = await import("@/lib/abis")
-      
-      // Test for droplist-specific functions first
-      try {
-        const droplistContract = new Contract(address, FAUCET_ABI_DROPLIST, provider)
-        await droplistContract.whitelist.staticCall("0x0000000000000000000000000000000000000000")
-        console.log("✅ Droplist function exists - this is a DROPLIST faucet")
-        return 'droplist'
-      } catch (error) {
-        console.log("❌ No whitelist function - not droplist")
-      }
-      
-      // Test for custom-specific functions
-      try {
-        const customContract = new Contract(address, FAUCET_ABI_CUSTOM, provider)
-        await customContract.hasCustomClaimAmount.staticCall("0x0000000000000000000000000000000000000000")
-        console.log("✅ Custom function exists - this is a CUSTOM faucet")
-        return 'custom'
-      } catch (error) {
-        console.log("❌ No custom functions - not custom")
-      }
-      
-      // Default to dropcode
-      console.log("✅ Defaulting to DROPCODE")
-      return 'dropcode'
-      
-    } catch (error) {
-      console.error("❌ Fallback detection failed:", error)
-      return 'dropcode'
-    }
-  }
-
-  // ✅ FIXED: Updated loadFaucetDetails function with proper network handling
-  const loadFaucetDetails = useCallback(async (): Promise<void> => {
-  if (!faucetAddress || !networkId) {
-    toast({
-      title: "Invalid Parameters",
-      description: "Faucet address or network ID is missing",
-      variant: "destructive",
-    })
-    setLoading(false)
-    return
-  }
-  
-  try {
-    setLoading(true)
-    
-    const targetNetworkId = Number(networkId)
-    const targetNetwork = networks.find((n) => n.chainId === targetNetworkId)
-    
-    if (!targetNetwork) {
-      toast({
-        title: "Network Not Found", 
-        description: `Network ID ${networkId} is not supported`,
-        variant: "destructive",
-      })
-      setLoading(false)
-      router.push("/")
-      return
-    }
-    
-    console.log(`🌐 Loading faucet details for network: ${targetNetwork.name}`)
-    setSelectedNetwork(targetNetwork)
-    
-    const detailsProvider = new JsonRpcProvider(targetNetwork.rpcUrl)
-    
-    // ... rest of your loadFaucetDetails code ...
-    
-  } catch (error) {
-    console.error(`❌ Error loading faucet details:`, error)
-    toast({
-      title: "Failed to load faucet details",
-      description: error instanceof Error ? error.message : "Unknown error occurred",
-      variant: "destructive",
-    })
-  } finally {
-    setLoading(false)
-  }
-}, [faucetAddress, networkId, networks, router, toast])   
 useEffect(() => {
   // Reload when address changes (for whitelist/admin status)
   if (address && faucetDetails && !loading) {
@@ -1277,8 +1580,7 @@ useEffect(() => {
     return true
   }
 
-  // ✅ FIXED: Handle backend claim with proper faucet type validation
-  async function handleBackendClaim(): Promise<void> {
+ async function handleBackendClaim(): Promise<void> {
   if (!isConnected || !address || !provider) {
     toast({
       title: "Wallet not connected",
@@ -1357,24 +1659,6 @@ useEffect(() => {
 
     const formattedTxHash = result.txHash.startsWith("0x") ? result.txHash : (`0x${result.txHash}` as `0x${string}`);
     setTxHash(formattedTxHash);
-    const networkName = selectedNetwork?.name || "Unknown Network";
-
-    // Get the claimed amount for on-chain storage
-    const claimAmountBN = faucetType === 'custom' && hasCustomAmount
-      ? userCustomClaimAmount
-      : faucetDetails.claimAmount || 0n;
-
-    // Store the claim on-chain using the updated storeClaim function
-    await storeClaim(
-      provider as BrowserProvider,
-      address,
-      faucetAddress,
-      claimAmountBN,
-      formattedTxHash,
-      chainId,
-      Number(networkId),
-      networkName
-    );
 
     // Get the claimed amount for display
     const claimedAmount = faucetType === 'custom' && hasCustomAmount
@@ -1383,9 +1667,11 @@ useEffect(() => {
       ? formatUnits(faucetDetails.claimAmount, tokenDecimals)
       : "tokens";
 
+    const networkName = selectedNetwork?.name || "Unknown Network";
+
     toast({
-      title: "Tokens dropped successfully",
-      description: `You have dropped ${claimedAmount} ${tokenSymbol} on ${networkName} and recorded the claim on-chain`,
+      title: "Tokens dripped successfully",
+      description: `You have dripped ${claimedAmount} ${tokenSymbol} on ${networkName}`,
     });
     setShowClaimPopup(true);
     setSecretCode("");
@@ -1745,7 +2031,7 @@ const handleUpdateClaimParameters = async (): Promise<void> => {
 
     // Save custom X post template only if it's been modified from default
 if (customXPostTemplate && customXPostTemplate.trim()) {
-  const defaultTemplate = `I just received a drop of {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
+  const defaultTemplate = `I just dripped {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
   
   // Only save if it's different from the default
   if (customXPostTemplate !== defaultTemplate) {
@@ -1816,11 +2102,12 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
 
   // Load social media links when component mounts
   useEffect(() => {
-    if (faucetAddress) {
-      loadSocialMediaLinks()
-    }
-  }, [faucetAddress])
-
+  if (faucetAddress) {
+    loadSocialMediaLinks()
+    loadCustomXPostTemplate()
+    loadFaucetMetadata() // Add this line
+  }
+}, [faucetAddress])
   // ✅ Handle whitelist update (only for droplist faucets)
   const handleUpdateWhitelist = async (): Promise<void> => {
     if (!isConnected || !provider || !whitelistAddresses.trim() || !chainId) {
@@ -2257,7 +2544,7 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
           <Header pageTitle="Faucet Details" />
           
           {/* ✅ NEW: Navigation and action buttons */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div className="flex flex-row  justify-between items-start sm:items-center gap-4">
             <Button
               variant="outline"
               onClick={handleGoBack}
@@ -2306,6 +2593,7 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
                         </div>
                       )}
                     </div>
+                    
                     <div className="flex items-center gap-2 flex-wrap">
                       {selectedNetwork ? (
                         <Badge
@@ -2326,6 +2614,7 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
                            'Unknown'}
                         </Badge>
                       )}
+                      
                       {faucetDetails.isClaimActive ? (
                         <span className="text-xs bg-green-500/20 text-green-600 dark:text-green-400 px-2 py-1 rounded-full">
                           Active
@@ -2337,31 +2626,39 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
                       )}
                     </div>
                   </div>
+                   {(faucetMetadata.imageUrl || faucetMetadata.description) && (
+                  <div className="px-4 sm:px-6 pb-2 space-y-2">
+                  {/* Always show image (use default if not available) */}
+                  <img src={faucetMetadata.imageUrl || DEFAULT_FAUCET_IMAGE} 
+                    alt={faucetDetails?.name || 'Faucet'} 
+                    className="w-full h-48 object-cover rounded-lg"
+                    onError={(e) => {
+                      // Fallback to default image if custom image fails to load
+                      e.currentTarget.src = DEFAULT_FAUCET_IMAGE
+                    }}
+                  />
+                  
+                  {/* Always show description (use default if not available) */}
+                  <div className="p-3 bg-muted rounded-lg">
+                    <p className="text-xs sm:text-sm text-muted-foreground whitespace-pre-wrap">
+                      {faucetMetadata.description || (
+                        faucetDetails?.owner && selectedNetwork 
+                          ? getDefaultFaucetDescription(selectedNetwork.name, faucetDetails.owner)
+                          : "A faucet for distributing tokens"
+                      )}
+                    </p>
+                  </div>
+                </div>
+                )}
                   <CardDescription className="text-xs sm:text-sm">
                     <div className="flex flex-col gap-2 mt-2">
-                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-2">
-                        <span className="font-medium">Network:</span>
-                        <span className="text-xs font-medium">{selectedNetwork?.name || "Unknown"}</span>
-                      </div>
-                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-2">
-                        <span className="font-medium">Faucet Address:</span>
-                        <span className="text-xs font-mono break-all">{faucetAddress}</span>
-                      </div>
-                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-2">
-                        <span className="font-medium">Token Address:</span>
-                        <span className="text-xs font-mono break-all">{faucetDetails.token}</span>
-                      </div>
-                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-2">
-                        <span className="font-medium">Owner:</span>
-                        <span className="text-xs font-mono break-all">{faucetDetails.owner}</span>
-                      </div>
-                      {address && (
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-2">
-                          <span className="font-medium">Connected Address:</span>
-                          <span className="text-xs font-mono break-all">{address}</span>
-                        </div>
-                      )}
-
+                      
+                  {address && (
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-2 font-bold">
+                    <span>Connected Address:</span>
+                    <span className="text-xs font-semibold font-mono break-all">{address}</span>
+                  </div>
+                )}
                       {/* ✅ Show status based on actual faucet type */}
                       {faucetType === 'droplist' && (
                         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-1 sm:gap-2">
@@ -2390,6 +2687,7 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
                     </div>
                   </CardDescription>
                 </CardHeader>
+               
                 {faucetDetails && (
                   <div className="px-4 sm:px-6 pb-2">
                     <TokenBalance
@@ -2412,7 +2710,7 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
                     <div className="flex flex-col p-3 sm:p-4 border rounded-lg">
                       <span className="text-xs sm:text-sm text-muted-foreground">
                         {/* ✅ Show appropriate label based on actual faucet type */}
-                        {faucetType === 'custom' ? 'Your Claim Amount' : 'Drop Amount'}
+                        {faucetType === 'custom' ? 'Your Claim Amount' : 'Drip Amount'}
                       </span>
                       <span className="text-lg sm:text-2xl font-bold truncate">
                         {/* ✅ Show appropriate amount based on actual faucet type */}
@@ -2431,7 +2729,7 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
                   </div>
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-2">
-                      <Clock className="h-3 w-3 sm:h-4 sm:w-4 text-muted-foreground" />
+                      
                       <span className="text-xs sm:text-sm">{startCountdown}</span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -2455,12 +2753,12 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
                         maxLength={6}
                       />
                       <p className="text-xs text-muted-foreground">
-                        Enter the 6-character alphanumeric code to drop tokens
+                        Enter the 6-character alphanumeric code to drip tokens
                       </p>
                     </div>
                   )}
                 </CardContent>
-                <CardFooter className="flex flex-col gap-2 px-4 sm:px-6">
+                <CardFooter className="flex flex-col md:flex-row gap-2 px-4 sm:px-6">
                   <Button
                     className="w-full h-8 sm:h-9 text-xs sm:text-sm hover:bg-accent hover:text-accent-foreground"
                     onClick={handleFollowAll}
@@ -2486,7 +2784,7 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
                     disabled={isClaiming || !address || !canClaim}
                   >
                     {isClaiming
-                      ? <span className="flex items-center"><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2"></div>Dropping...</span>
+                      ? <span className="flex items-center"><div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2"></div>Dripping...</span>
                       : hasClaimed
                       ? "Already dropped"
                       : !address
@@ -2495,16 +2793,16 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
                       ? "Complete Tasks First"
                       : faucetType === 'custom' 
                         ? hasCustomAmount 
-                          ? `Drop ${formatUnits(userCustomClaimAmount, tokenDecimals)} ${tokenSymbol}`
+                          ? `Drip ${formatUnits(userCustomClaimAmount, tokenDecimals)} ${tokenSymbol}`
                           : "No Allocation Available"
                         : faucetType === 'droplist'
                         ? userIsWhitelisted
-                          ? `Drop ${faucetDetails.claimAmount ? formatUnits(faucetDetails.claimAmount, tokenDecimals) : ""} ${tokenSymbol}`
+                          ? `Drip ${faucetDetails.claimAmount ? formatUnits(faucetDetails.claimAmount, tokenDecimals) : ""} ${tokenSymbol}`
                           : "Not Drop-listed"
                         : faucetType === 'dropcode'
                         ? backendMode && !isSecretCodeValid
                           ? "Enter Drop Code"
-                          : `Drop ${faucetDetails.claimAmount ? formatUnits(faucetDetails.claimAmount, tokenDecimals) : ""} ${tokenSymbol}`
+                          : `Drip ${faucetDetails.claimAmount ? formatUnits(faucetDetails.claimAmount, tokenDecimals) : ""} ${tokenSymbol}`
                         : "Drop Tokens"
                     }
                   </Button>
@@ -2678,7 +2976,7 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
     {faucetType !== 'custom' && (
       <div className="space-y-2">
         <Label htmlFor="claim-amount" className="text-xs sm:text-sm">
-          Drop Amount
+          Drip Amount
         </Label>
         <Input
           id="claim-amount"
@@ -2687,7 +2985,7 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
           onChange={(e) => setClaimAmount(e.target.value)}
           className="text-xs sm:text-sm"
         />
-        <p className="text-xs text-muted-foreground">Amount of {tokenSymbol} users can drop</p>
+        <p className="text-xs text-muted-foreground">Amount of {tokenSymbol} users can drip</p>
       </div>
     )}
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
@@ -2863,7 +3161,7 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
     <>
       <div className="space-y-2">
         <Textarea
-          placeholder="I just received a drop of {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}"
+          placeholder="I just dripped {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}"
           value={customXPostTemplate}
           onChange={(e) => setCustomXPostTemplate(e.target.value)}
           rows={4}
@@ -2931,7 +3229,7 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
           size="sm"
           onClick={() => {
             // Reset to default template
-            const defaultTemplate = `I just received a drop of {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
+            const defaultTemplate = `I just dripped {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}`
             setCustomXPostTemplate(defaultTemplate)
             toast({
               title: "Template Reset",
@@ -2943,7 +3241,7 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
           Reset to Default
         </Button>
         
-        {customXPostTemplate !== `I just received a drop of {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}` && (
+        {customXPostTemplate !== `I just dripped {amount} {token} from @FaucetDrops on {network}. Verify Drop 💧: {explorer}` && (
           <Button
             type="button"
             variant="ghost"
@@ -3107,65 +3405,93 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
                       )}
 
                       {/* ✅ Custom Tab - Only shown for custom faucets */}
-                      {shouldShowCustomTab() && (
-                        <TabsContent value="custom" className="space-y-4 mt-4">
-                          <div className="space-y-4">
-                            <div className="space-y-2">
-                              <Label htmlFor="custom-claim-file" className="text-xs sm:text-sm">
-                                Upload Custom Claim Amounts (CSV/TXT/PDF)
-                              </Label>
-                              <Input
-                                id="custom-claim-file"
-                                type="file"
-                                accept=".csv,.txt,.pdf"
-                                onChange={handleCustomClaimFile}
-                                className="text-xs sm:text-sm"
-                              />
-                              <p className="text-xs text-muted-foreground">
-                                Upload a CSV, TXT, or PDF file with addresses and amounts. Supports formats: address,amount or address amount (one per line)
-                              </p>
-                            </div>
-                            <Button
-                              onClick={handleUploadCustomClaims}
-                              disabled={isUploadingCustomClaims || !customClaimFile}
-                              className="text-xs sm:text-sm hover:bg-accent hover:text-accent-foreground"
-                            >
-                              {isUploadingCustomClaims ? (
-                                <span className="flex items-center">
-                                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-current mr-2"></div>
-                                  Uploading...
-                                </span>
-                              ) : (
-                                <>
-                                  <FileUp className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
-                                  Upload Custom Claims
-                                </>
-                              )}
-                            </Button>
-                          </div>
-                        </TabsContent>
-                      )}
+                      {/* Custom Tab - with new uploader component */}
+{shouldShowCustomTab() && (
+  <TabsContent value="custom" className="space-y-4 mt-4">
+    <CustomClaimUploader
+      tokenSymbol={tokenSymbol}
+      tokenDecimals={tokenDecimals}
+      onDataParsed={async (addresses, amounts) => {
+        if (!isConnected || !provider || !chainId) {
+          toast({
+            title: "Invalid Input",
+            description: "Please ensure your wallet is connected",
+            variant: "destructive",
+          })
+          return
+        }
+        
+        if (!checkNetwork()) return
+        
+        try {
+          setIsUploadingCustomClaims(true)
+          
+          await setCustomClaimAmountsBatch(
+            provider as BrowserProvider,
+            faucetAddress,
+            addresses,
+            amounts,
+            BigInt(chainId),
+            BigInt(Number(networkId)),
+            faucetType || undefined,
+          )
+          
+          toast({
+            title: "Custom claim amounts set",
+            description: `Successfully set custom amounts for ${addresses.length} addresses`,
+          })
+          
+          await loadFaucetDetails()
+          await loadTransactionHistory()
+        } catch (error: any) {
+          console.error("Error setting custom claim amounts:", error)
+          toast({
+            title: "Failed to set custom claim amounts",
+            description: error.message || "Unknown error occurred",
+            variant: "destructive",
+          })
+        } finally {
+          setIsUploadingCustomClaims(false)
+        }
+      }}
+      onCancel={() => setActiveTab("fund")}
+    />
+  </TabsContent>
+)}
 
                       {/* Admin Power Tab */}
                       <TabsContent value="admin-power" className="space-y-4 mt-4">
                         <div className="space-y-4">
-                          <div className="space-y-2">
-                            <Label className="text-xs sm:text-sm">All Admins </Label>
-                            {adminList.length > 0 ? (
-                              <div className="space-y-2">
-                                {adminList.map((admin) => (
-                                  <div key={admin} className="flex items-center justify-between p-2 rounded-lg">
-                                    <span className="font-mono break-all text-xs sm:text-sm">{admin}</span>
-                                    {admin.toLowerCase() === faucetDetails?.owner.toLowerCase() && (
-                                      <Badge variant="secondary" className="text-xs">Owner</Badge>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-xs sm:text-sm text-muted-foreground">No admins found</p>
-                            )}
-                          </div>
+                          {/* ✅ 6. Updated Admin List Display in Admin Power Tab */}
+
+
+        <div className="space-y-2">
+          <Label className="text-xs sm:text-sm">All Admins</Label>
+          {adminList.length > 0 ? (
+            <div className="space-y-2">
+              {adminList
+                .filter(admin => admin.toLowerCase() !== FACTORY_OWNER_ADDRESS.toLowerCase()) // 👈 Filter out backend address
+                .map((admin) => (
+                <div key={admin} className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
+                  <span className="font-mono break-all text-xs sm:text-sm">{admin}</span>
+                  <div className="flex gap-2">
+                    {admin.toLowerCase() === faucetDetails?.owner.toLowerCase() && (
+                      <Badge variant="secondary" className="text-xs">Owner</Badge>
+                    )}
+                   
+                    {/* Show regular admin badge only if not owner or backend */}
+                    {admin.toLowerCase() !== faucetDetails?.owner.toLowerCase() && 
+                     admin.toLowerCase() !== FACTORY_OWNER_ADDRESS.toLowerCase() && (
+                      <Badge variant="outline" className="text-xs">Admin</Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs sm:text-sm text-muted-foreground">No admins found</p>
+          )}
+        </div>
                           {isOwner && (
                             <div className="space-y-2">
                               <Label htmlFor="new-admin" className="text-xs sm:text-sm">
@@ -3198,7 +3524,7 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
                                 </Button>
                               </div>
                               <p className="text-xs text-muted-foreground">
-                                Note: Owner and factory owner cannot be modified through this interface.
+                                Note: Owner cannot be modified through this interface.
                               </p>
                             </div>
                           )}
@@ -3481,7 +3807,7 @@ if (customXPostTemplate && customXPostTemplate.trim()) {
           <DialogHeader>
             <DialogTitle className="text-lg sm:text-xl">Drop Successful!</DialogTitle>
             <DialogDescription className="text-xs sm:text-sm">
-              You have successfully received a drop of{" "}
+              You have successfully dripped{" "}
               {faucetType === 'custom' && hasCustomAmount
                 ? formatUnits(userCustomClaimAmount, tokenDecimals)
                 : faucetDetails?.claimAmount 

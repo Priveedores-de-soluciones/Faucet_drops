@@ -54,7 +54,7 @@ export function Header({ pageTitle }: { pageTitle: string }) {
         <div className="flex flex-col gap-2">
           <NetworkSelector />
           <Link href="/" className="text-xs sm:text-sm hover:underline">
-            Back to Networks
+            Back to Home
           </Link>
           <WalletConnect />
         </div>
@@ -64,7 +64,7 @@ export function Header({ pageTitle }: { pageTitle: string }) {
       <div className="hidden sm:flex items-center gap-2 sm:gap-3">
         <NetworkSelector />
         <Link href="/" className="text-xs sm:text-sm hover:underline">
-          Back to Networks
+          Back to Home
         </Link>
         <WalletConnect />
       </div>

@@ -9,6 +9,111 @@ import { getAllClaimsForAllNetworks } from "@/lib/faucet"
 import { DataService, UserData } from "@/lib/database-helpers"
 import { FACTORY_ABI } from "@/lib/abis"
 
+// Default baseline data - historical user data
+const DEFAULT_USER_DATA: ChartUserData[] = [   					
+{date: "2025-06-21", newUsers: 22, cumulativeUsers: 22},
+
+{date: "2025-06-22", newUsers: 1, cumulativeUsers: 23},
+
+{date: "2025-06-23", newUsers: 1, cumulativeUsers: 24},
+
+{date: "2025-07-01", newUsers: 4, cumulativeUsers: 28},
+
+{date: "2025-07-03", newUsers: 36, cumulativeUsers: 64},
+
+{date: "2025-07-11", newUsers: 5, cumulativeUsers: 69},
+ 
+{date: "2025-07-22", newUsers: 2, cumulativeUsers: 71},
+
+{date: "2025-07-23", newUsers: 4, cumulativeUsers: 75},
+
+{date: "2025-07-24", newUsers: 7, cumulativeUsers: 82},
+
+{date: "2025-07-25", newUsers: 19, cumulativeUsers: 101},
+
+{date: "2025-07-26", newUsers: 24, cumulativeUsers: 125},
+
+{date: "2025-07-29", newUsers: 6, cumulativeUsers: 131},
+
+{date: "2025-07-30", newUsers: 1, cumulativeUsers: 132},
+
+{date: "2025-08-01", newUsers: 11, cumulativeUsers: 143},
+
+{date: "2025-08-08", newUsers: 2, cumulativeUsers: 145},
+ 
+{date: "2025-08-13", newUsers: 1, cumulativeUsers: 146},
+ 
+{date: "2025-08-25", newUsers: 1, cumulativeUsers: 147},
+ 
+{date: "2025-08-27", newUsers: 173, cumulativeUsers: 320},
+ 
+{date: "2025-08-30", newUsers: 22, cumulativeUsers: 342},
+ 
+{date: "2025-09-08", newUsers: 30, cumulativeUsers: 372},
+ 
+{date: "2025-09-13", newUsers: 87, cumulativeUsers: 459},
+ 
+{date: "2025-09-15", newUsers: 76, cumulativeUsers: 535},
+ 
+{date: "2025-09-16", newUsers: 19, cumulativeUsers: 554},
+ 
+{date: "2025-09-17", newUsers: 56, cumulativeUsers: 610},
+ 
+{date: "2025-09-18", newUsers: 4, cumulativeUsers: 614},
+ 
+{date: "2025-09-19", newUsers: 34, cumulativeUsers: 648},
+ 
+{date: "2025-09-20", newUsers: 1, cumulativeUsers: 649},
+ 
+{date: "2025-09-22", newUsers: 28, cumulativeUsers: 677},
+ 
+{date: "2025-09-23", newUsers: 2, cumulativeUsers: 679},
+ 
+{date: "2025-09-30", newUsers: 1, cumulativeUsers: 680},
+ 
+{date: "2025-10-02", newUsers: 32, cumulativeUsers: 712},
+ 
+{date: "2025-10-06", newUsers: 13, cumulativeUsers: 725},
+ 
+{date: "2025-10-11", newUsers: 2, cumulativeUsers: 727},
+ 
+{date: "2025-10-12", newUsers: 1, cumulativeUsers: 728},
+ 
+{date: "2025-10-16", newUsers: 1, cumulativeUsers: 729},
+ 
+{date: "2025-10-17", newUsers: 13, cumulativeUsers: 742},
+ 
+{date: "2025-10-18", newUsers: 1, cumulativeUsers: 743},
+ 
+{date: "2025-10-19", newUsers: 4, cumulativeUsers: 747},
+ 
+{date: "2025-10-20", newUsers: 10, cumulativeUsers: 757},
+ 
+{date: "2025-10-24", newUsers: 2, cumulativeUsers: 759},
+ 
+{date: "2025-10-31", newUsers: 2, cumulativeUsers: 761},
+ 
+{date: "2025-11-01", newUsers: 6, cumulativeUsers: 767},
+ 
+{date: "2025-11-08", newUsers: 385, cumulativeUsers: 1152},
+ 
+{date: "2025-11-09", newUsers: 148, cumulativeUsers: 1300},
+ 
+{date: "2025-11-10", newUsers: 39, cumulativeUsers: 1339},
+ 
+{date: "2025-11-12", newUsers: 2, cumulativeUsers: 1341},
+ 
+{date: "2025-11-13", newUsers: 3, cumulativeUsers: 1344},
+ 
+{date: "2025-11-15", newUsers: 1, cumulativeUsers: 1345},
+ 
+{date: "2025-11-20", newUsers: 60, cumulativeUsers: 1405},
+ 
+{date: "2025-11-21", newUsers: 1, cumulativeUsers: 1406}
+  ];
+
+// Get the latest cumulative users from default data
+const DEFAULT_TOTAL_USERS = DEFAULT_USER_DATA[DEFAULT_USER_DATA.length - 1].cumulativeUsers;
 
 // Cache keys for unique users data
 const UNIQUE_USERS_STORAGE_KEYS = {
@@ -171,6 +276,54 @@ interface ChartUserData {
   cumulativeUsers: number
 }
 
+// Function to merge default data with fresh data
+function mergeUserData(defaultData: ChartUserData[], freshData: ChartUserData[]): ChartUserData[] {
+  if (freshData.length === 0) {
+    return defaultData;
+  }
+
+  // Create a map of dates from fresh data
+  const freshDataMap = new Map(freshData.map(item => [item.date, item]));
+  
+  // Get the last date from default data and first date from fresh data
+  const lastDefaultDate = defaultData[defaultData.length - 1].date;
+  const firstFreshDate = freshData[0].date;
+  
+  // If fresh data starts after default data, merge them
+  if (firstFreshDate > lastDefaultDate) {
+    // Use default data up to the last date, then append fresh data
+    return [...defaultData, ...freshData];
+  }
+  
+  // If there's overlap, use fresh data and fill in any gaps from default data
+  const mergedMap = new Map<string, ChartUserData>();
+  
+  // Start with default data
+  defaultData.forEach(item => {
+    mergedMap.set(item.date, item);
+  });
+  
+  // Override with fresh data
+  freshData.forEach(item => {
+    mergedMap.set(item.date, item);
+  });
+  
+  // Convert back to array and sort by date
+  const merged = Array.from(mergedMap.values()).sort((a, b) => 
+    new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+  
+  // Recalculate cumulative users to ensure consistency
+  let cumulative = 0;
+  return merged.map(item => {
+    cumulative += item.newUsers;
+    return {
+      ...item,
+      cumulativeUsers: cumulative
+    };
+  });
+}
+
 // Function to process and cache unique users data
 function processAndStoreUsersData(allClaimsUnified: any[]): {
   chartData: ChartUserData[]
@@ -227,31 +380,35 @@ function processAndStoreUsersData(allClaimsUnified: any[]): {
 
   const totalUniqueUsers = uniqueClaimers.size;
 
+  // Merge with default data
+  const mergedData = mergeUserData(DEFAULT_USER_DATA, chartData);
+  const finalTotalUsers = mergedData[mergedData.length - 1].cumulativeUsers;
+
   // Cache in localStorage
-  saveToLocalStorage(UNIQUE_USERS_STORAGE_KEYS.CHART_DATA, chartData);
-  saveToLocalStorage(UNIQUE_USERS_STORAGE_KEYS.TOTAL_USERS, totalUniqueUsers);
+  saveToLocalStorage(UNIQUE_USERS_STORAGE_KEYS.CHART_DATA, mergedData);
+  saveToLocalStorage(UNIQUE_USERS_STORAGE_KEYS.TOTAL_USERS, finalTotalUsers);
   saveToLocalStorage("total_claim", allClaimsCount);
   saveToLocalStorage(UNIQUE_USERS_STORAGE_KEYS.USERS_DATA, Array.from(uniqueClaimers));
   saveToLocalStorage(UNIQUE_USERS_STORAGE_KEYS.LAST_UPDATED, Date.now());
 
   console.log("Cached users data:", {
     totalClaims: allClaimsCount,
-    totalUniqueUsers: totalUniqueUsers,
-    chartDataPoints: chartData.length
+    totalUniqueUsers: finalTotalUsers,
+    chartDataPoints: mergedData.length
   });
 
   return {
-    chartData,
-    totalUniqueUsers,
+    chartData: mergedData,
+    totalUniqueUsers: finalTotalUsers,
     totalClaims: allClaimsCount
   };
 }
 
 export function NewUsersChart() {
   const { networks } = useNetwork()
-  const [data, setData] = useState<ChartUserData[]>([])
-  const [loading, setLoading] = useState(true)
-  const [totalNewUsers, setTotalNewUsers] = useState(0)
+  const [data, setData] = useState<ChartUserData[]>(DEFAULT_USER_DATA)
+  const [loading, setLoading] = useState(false) // Start with default data, so not loading initially
+  const [totalNewUsers, setTotalNewUsers] = useState(DEFAULT_TOTAL_USERS)
  
   const fetchAndStoreData = async (forceRefresh = false) => {
     setLoading(true)
@@ -320,7 +477,6 @@ export function NewUsersChart() {
         console.log('Using cached users data from localStorage');
         setData(cachedData);
         setTotalNewUsers(cachedTotal);
-        setLoading(false);
         return true;
       }
     }
@@ -345,7 +501,6 @@ export function NewUsersChart() {
         saveToLocalStorage(UNIQUE_USERS_STORAGE_KEYS.TOTAL_USERS, totalUsers);
         saveToLocalStorage(UNIQUE_USERS_STORAGE_KEYS.LAST_UPDATED, Date.now());
         
-        setLoading(false);
         return true;
       }
     } catch (error) {
@@ -356,7 +511,9 @@ export function NewUsersChart() {
   };
 
   useEffect(() => {
+    // Load stored data in the background, but show default data immediately
     loadStoredData().then((dataLoaded) => {
+      // If no cached or Supabase data was loaded, fetch fresh data
       if (!dataLoaded && networks.length > 0) {
         fetchAndStoreData();
       }
@@ -373,14 +530,6 @@ export function NewUsersChart() {
 
     return () => clearInterval(interval);
   }, [networks]);
-
-  if (loading && data.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    )
-  }
 
   // Custom tooltip to show both new and cumulative users
   const CustomTooltip = ({ active, payload, label }: any) => {

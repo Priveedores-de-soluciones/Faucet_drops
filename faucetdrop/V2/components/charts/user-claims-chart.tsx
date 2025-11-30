@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { JsonRpcProvider, Contract, isAddress, formatUnits, ZeroAddress } from "ethers"
 import { useNetwork } from "@/hooks/use-network"
-import { FACTORY_ABI, FAUCET_ABI, ERC20_ABI } from "@/lib/abis"
+import { FACTORY_ABI, FAUCET_ABI, ERC20_ABI } from "@/lib/abis" // Assuming FAUCET_ABI and ERC20_ABI are defined elsewhere
 import { useToast } from "@/hooks/use-toast"
 import { DataService, ClaimData } from "@/lib/database-helpers"
 
@@ -66,7 +66,7 @@ const STORAGE_KEYS = {
 // Cache duration (5 minutes)
 const CACHE_DURATION = 5 * 60 * 1000
 
-// Claim type definition
+// Claim type definition (UPDATED to include faucetName)
 type ClaimType = {
   claimer: string
   faucet: string
@@ -77,6 +77,7 @@ type ClaimType = {
   tokenSymbol: string
   tokenDecimals: number
   isEther: boolean
+  faucetName?: string // Now included from chain fetch
 }
 
 // Helper function to save data to localStorage
@@ -151,6 +152,7 @@ async function getTokenInfo(
 
   // Query the token contract
   try {
+    // Assuming ERC20_ABI includes symbol() and decimals()
     const tokenContract = new Contract(tokenAddress, ERC20_ABI, provider)
     const [symbol, decimals] = await Promise.all([
       tokenContract.symbol(),
@@ -170,7 +172,42 @@ async function getTokenInfo(
   }
 }
 
-// Function to get claims from factories for a single network
+// NEW HELPER: Robustly get the faucet name
+async function getFaucetName(
+  faucetAddress: string,
+  provider: JsonRpcProvider
+): Promise<string> {
+  const defaultName = `Faucet ${faucetAddress.slice(0, 6)}...${faucetAddress.slice(-4)}`;
+  
+  // Try common name functions (assuming FAUCET_ABI includes them, or we define custom ABIs here)
+  const nameFunctions = ['name', 'getName', 'faucetName'];
+  
+  for (const func of nameFunctions) {
+    try {
+      // Create a temporary contract interface just for this function call
+      const contract = new Contract(faucetAddress, [{
+        "inputs": [],
+        "name": func,
+        "outputs": [{ "internalType": "string", "name": "", "type": "string" }],
+        "stateMutability": "view",
+        "type": "function"
+      }], provider);
+      
+      const fetchedName = await contract[func]();
+      
+      if (fetchedName && fetchedName.trim() !== '' && fetchedName !== ZeroAddress) {
+        return fetchedName;
+      }
+    } catch (error) {
+      // Ignore errors and try the next function
+    }
+  }
+
+  return defaultName;
+}
+
+
+// Function to get claims from factories for a single network (UPDATED to fetch name)
 async function getAllClaimsFromFactories(
   provider: JsonRpcProvider,
   network: any,
@@ -185,6 +222,7 @@ async function getAllClaimsFromFactories(
   chainId: number
   tokenSymbol: string
   tokenDecimals: number
+  faucetName: string // Explicitly added to the return type
 }[]> {
   try {
     let allClaims: any[] = []
@@ -194,6 +232,7 @@ async function getAllClaimsFromFactories(
         console.warn(`Invalid factory address ${factoryAddress} on ${network.name}`)
         continue
       }
+      // Assuming FACTORY_ABI includes getAllTransactions()
       const factoryContract = new Contract(factoryAddress, FACTORY_ABI, provider)
       
       const code = await provider.getCode(factoryAddress)
@@ -222,14 +261,18 @@ async function getAllClaimsFromFactories(
     // Process claims and get additional information
     const processedClaims = await Promise.all(
       allClaims.map(async (claim) => {
-        // Get token information
-        let tokenInfo
+        
+        let tokenInfo;
+        let tokenAddress = ZeroAddress;
+        let faucetName = '';
+
         if (claim.isEther) {
           tokenInfo = await getTokenInfo("", provider, network.chainId, true)
+          faucetName = `${network.nativeCurrency.symbol} Faucet (Native)`;
         } else {
+          // --- Fetch Token Address ---
           try {
             const faucetContract = new Contract(claim.faucetAddress, FAUCET_ABI, provider)
-            let tokenAddress
             
             try {
               tokenAddress = await faucetContract.token()
@@ -241,11 +284,23 @@ async function getAllClaimsFromFactories(
                 tokenAddress = chainConfig?.nativeTokenAddress || ZeroAddress
               }
             }
-            
-            tokenInfo = await getTokenInfo(tokenAddress, provider, network.chainId, false)
           } catch (error) {
-            console.warn(`Error getting token info for faucet ${claim.faucetAddress}:`, error)
-            tokenInfo = { symbol: "TOKEN", decimals: 18 }
+             // Failed to get token address, proceed with default/native address
+          }
+            
+          // --- Fetch Token Info AND Faucet Name concurrently ---
+          try {
+            const [fetchedTokenInfo, fetchedFaucetName] = await Promise.all([
+                getTokenInfo(tokenAddress, provider, network.chainId, false),
+                getFaucetName(claim.faucetAddress, provider)
+            ]);
+
+            tokenInfo = fetchedTokenInfo;
+            faucetName = fetchedFaucetName;
+          } catch (error) {
+            console.warn(`Error fetching details for faucet ${claim.faucetAddress}:`, error);
+            tokenInfo = { symbol: "TOKEN", decimals: 18 };
+            faucetName = `Faucet ${claim.faucetAddress.slice(0, 6)}...${claim.faucetAddress.slice(-4)}`;
           }
         }
 
@@ -259,7 +314,8 @@ async function getAllClaimsFromFactories(
           networkName: network.name,
           chainId: network.chainId,
           tokenSymbol: tokenInfo.symbol,
-          tokenDecimals: tokenInfo.decimals
+          tokenDecimals: tokenInfo.decimals,
+          faucetName: faucetName // <-- Now included
         }
       })
     )
@@ -271,7 +327,7 @@ async function getAllClaimsFromFactories(
   }
 }
 
-// Function to get all claims from all networks
+// Function to get all claims from all networks (UPDATED to map faucetName)
 async function getAllClaimsFromAllNetworks(
   networks: any[]
 ): Promise<ClaimType[]> {
@@ -295,6 +351,7 @@ async function getAllClaimsFromAllNetworks(
         tokenSymbol: claim.tokenSymbol,
         tokenDecimals: claim.tokenDecimals,
         isEther: claim.isEther,
+        faucetName: claim.faucetName, // <-- Now mapped
       }))
       
       allClaims.push(...convertedClaims)
@@ -363,70 +420,30 @@ export function UserClaimsChart() {
     return colors
   }
 
-  // Function to fetch faucet names with caching
+  // Function to fetch faucet names with caching (SIMPLIFIED)
   const fetchFaucetNames = useCallback(async (claimsData: ClaimType[]) => {
     // Load cached names first
     const cachedNames = loadFromLocalStorage<Record<string, string>>(STORAGE_KEYS.FAUCET_NAMES) || {};
-    setFaucetNames(cachedNames);
+    let newNames: Record<string, string> = { ...cachedNames };
 
-    const faucetAddresses = [...new Set(claimsData.map(claim => claim.faucet))];
-    const uncachedAddresses = faucetAddresses.filter(addr => !cachedNames[addr]);
-
-    if (uncachedAddresses.length === 0) {
-      console.log('All faucet names already cached');
-      return cachedNames;
-    }
-
-    console.log(`Fetching names for ${uncachedAddresses.length} uncached faucets...`);
-    const namePromises = uncachedAddresses.map(async (faucetAddress) => {
-      try {
-        const claim = claimsData.find(c => c.faucet === faucetAddress);
-        if (!claim) return null;
-
-        const network = networks.find(n => n.chainId === claim.chainId);
-        if (!network) return null;
-
-        const provider = new JsonRpcProvider(network.rpcUrl);
-        const faucetContract = new Contract(faucetAddress, FAUCET_ABI, provider);
-
-        let faucetName: string;
-        try {
-          faucetName = await faucetContract.name();
-          if (!faucetName || faucetName.trim() === '') {
-            faucetName = `Faucet ${faucetAddress.slice(0, 6)}...${faucetAddress.slice(-4)}`;
-          }
-        } catch (error) {
-          faucetName = `Faucet ${faucetAddress.slice(0, 6)}...${faucetAddress.slice(-4)}`;
+    // Update with names freshly retrieved from the chain (present in claimsData)
+    claimsData.forEach(claim => {
+        if (claim.faucetName) {
+            newNames[claim.faucet.toLowerCase()] = claim.faucetName;
         }
-
-        return { address: faucetAddress, name: faucetName };
-      } catch (error) {
-        return {
-          address: faucetAddress,
-          name: `Faucet ${faucetAddress.slice(0, 6)}...${faucetAddress.slice(-4)}`,
-        };
-      }
-    });
-
-    const results = await Promise.all(namePromises);
-    const newNames: Record<string, string> = { ...cachedNames };
-    
-    results.forEach(result => {
-      if (result && result.name) {
-        newNames[result.address] = result.name;
-      }
     });
 
     setFaucetNames(newNames);
     saveToLocalStorage(STORAGE_KEYS.FAUCET_NAMES, newNames);
     return newNames;
-  }, [networks]);
+  }, []);
 
   const fetchAndStoreData = async () => {
     setLoading(true)
     try {
       console.log("Fetching claims from factory sources...")
       
+      // Claims now include faucetName
       const allClaims = await getAllClaimsFromAllNetworks(networks)
       console.log("Fetched factory claims:", allClaims.length)
 
@@ -469,22 +486,25 @@ export function UserClaimsChart() {
       setTotalClaims(totalClaimsCount)
       setTotalFaucets(Object.keys(claimsByFaucet).length)
 
-      // Fetch faucet names with caching
-      const fetchedNames = await fetchFaucetNames(allClaims)
+      // Fetch faucet names with caching (Populates faucetNames state and cache)
+      const combinedNames = await fetchFaucetNames(allClaims)
 
       // Create faucet rankings
       const rankingData: FaucetRanking[] = Object.entries(claimsByFaucet)
         .sort(([, a], [, b]) => b.latestTimestamp - a.latestTimestamp)
-        .map(([faucet, data], index) => ({
-          rank: index + 1,
-          faucetAddress: faucet,
-          faucetName: fetchedNames[faucet] || `Faucet ${faucet.slice(0, 6)}...${faucet.slice(-4)}`,
-          network: data.network,
-          chainId: data.chainId,
-          totalClaims: data.claims,
-          latestClaimTime: data.latestTimestamp,
-          totalAmount: `${Number(formatUnits(data.totalAmount, data.tokenDecimals)).toFixed(4)} ${data.tokenSymbol}`
-        }))
+        .map(([faucet, data], index) => {
+           const faucetName = combinedNames[faucet] || `Faucet ${faucet.slice(0, 6)}...${faucet.slice(-4)}`;
+           return {
+              rank: index + 1,
+              faucetAddress: faucet,
+              faucetName: faucetName,
+              network: data.network,
+              chainId: data.chainId,
+              totalClaims: data.claims,
+              latestClaimTime: data.latestTimestamp,
+              totalAmount: `${Number(formatUnits(data.totalAmount, data.tokenDecimals)).toFixed(4)} ${data.tokenSymbol}`
+           }
+        })
 
       setFaucetRankings(rankingData)
 
@@ -506,7 +526,7 @@ export function UserClaimsChart() {
       const colors = generateColors(top10Faucets.length + (otherTotalClaims > 0 ? 1 : 0))
       
       const chartData: ChartClaimData[] = top10Faucets.map(([faucet, data], index) => {
-        const faucetName = fetchedNames[faucet] || `${faucet.slice(0, 6)}...${faucet.slice(-4)}`
+        const faucetName = combinedNames[faucet] || `${faucet.slice(0, 6)}...${faucet.slice(-4)}`
         return {
           name: faucetName,
           value: data.claims,
@@ -542,8 +562,6 @@ export function UserClaimsChart() {
 
       console.log("Claims chart data (Top 10):", chartData)
       console.log("Faucet rankings (All):", rankingData)
-      console.log("Total claims:", totalClaimsCount)
-      console.log("Total faucets:", Object.keys(claimsByFaucet).length)
 
       setData(chartData)
       
@@ -567,14 +585,87 @@ export function UserClaimsChart() {
     }
   }
 
+  // UPDATED: loadStoredData to correctly populate faucetNames state from cache/Supabase
   const loadStoredData = async () => {
     // Try localStorage first
     if (isCacheValid()) {
       const cachedClaims = loadFromLocalStorage<ClaimType[]>(STORAGE_KEYS.CLAIMS_DATA)
       if (cachedClaims && cachedClaims.length > 0) {
         console.log('Using cached claims data from localStorage')
-        // Process cached data to rebuild UI state
-        // This is a simplified version - you might want to cache the processed data too
+        
+        // --- LOGIC FOR CACHED DATA PROCESSING ---
+        const claimsByFaucet: { [key: string]: { 
+            claims: number, 
+            network: string,
+            chainId: number,
+            totalAmount: bigint,
+            tokenSymbol: string,
+            tokenDecimals: number,
+            latestTimestamp: number
+        } } = {}
+
+        for (const claim of cachedClaims) {
+            const faucetKey = claim.faucet.toLowerCase()
+            
+            if (!claimsByFaucet[faucetKey]) {
+                claimsByFaucet[faucetKey] = { 
+                    claims: 0, 
+                    network: claim.networkName,
+                    chainId: claim.chainId,
+                    totalAmount: BigInt(0),
+                    tokenSymbol: claim.tokenSymbol,
+                    tokenDecimals: claim.tokenDecimals,
+                    latestTimestamp: 0
+                }
+            }
+            
+            claimsByFaucet[faucetKey].claims += 1
+            claimsByFaucet[faucetKey].totalAmount += claim.amount
+            
+            if (claim.timestamp > claimsByFaucet[faucetKey].latestTimestamp) {
+                claimsByFaucet[faucetKey].latestTimestamp = claim.timestamp
+            }
+        }
+        
+        // Load cached names separately (CRITICAL FIX)
+        const cachedNames = loadFromLocalStorage<Record<string, string>>(STORAGE_KEYS.FAUCET_NAMES) || {};
+        
+        // Use cached names and data to build rankings/chart data
+        const rankingData = Object.entries(claimsByFaucet)
+            .sort(([, a], [, b]) => b.latestTimestamp - a.latestTimestamp)
+            .map(([faucet, data], index) => {
+                const name = cachedNames[faucet] || `Faucet ${faucet.slice(0, 6)}...${faucet.slice(-4)}`;
+                return {
+                    rank: index + 1,
+                    faucetAddress: faucet,
+                    faucetName: name,
+                    network: data.network,
+                    chainId: data.chainId,
+                    totalClaims: data.claims,
+                    latestClaimTime: data.latestTimestamp,
+                    totalAmount: `${Number(formatUnits(data.totalAmount, data.tokenDecimals)).toFixed(4)} ${data.tokenSymbol}`
+                }
+            })
+
+        const top10Faucets = Object.entries(claimsByFaucet)
+            .sort(([, a], [, b]) => b.claims - a.claims)
+            .slice(0, 10);
+            
+        const colors = generateColors(top10Faucets.length);
+        
+        const chartData: ChartClaimData[] = top10Faucets.map(([faucet, data], index) => ({
+            name: cachedNames[faucet] || `${faucet.slice(0, 6)}...${faucet.slice(-4)}`,
+            value: data.claims,
+            color: colors[index],
+            faucetAddress: faucet
+        }));
+
+        setFaucetNames(cachedNames); // CRUCIAL: Set the names map
+        setFaucetRankings(rankingData);
+        setData(chartData);
+        setTotalClaims(cachedClaims.length);
+        setTotalFaucets(rankingData.length);
+        
         setLoading(false)
         return true
       }
@@ -586,8 +677,17 @@ export function UserClaimsChart() {
       if (supabaseData.length > 0 && DataService.isDataFresh(supabaseData[0].updated_at)) {
         console.log('Using fresh claim data from Supabase')
         
+        // 1. Build the FaucetNames Map from Supabase data (CRITICAL FIX)
+        const newFaucetNames: Record<string, string> = {};
+        supabaseData.forEach(item => {
+            newFaucetNames[item.faucet_address] = item.faucet_name;
+        });
+
+        // 2. Set the state before generating chart/ranking data
+        setFaucetNames(newFaucetNames); // CRUCIAL: Set the names map
+        
         const chartData = supabaseData.slice(0, 10).map((item, index) => ({
-          name: item.faucet_name,
+          name: item.faucet_name, // Name comes directly from Supabase
           value: item.claims,
           color: `hsl(${(index * 137.508) % 360}, 70%, 60%)`,
           faucetAddress: item.faucet_address
@@ -596,7 +696,7 @@ export function UserClaimsChart() {
         const rankingData = supabaseData.map((item, index) => ({
           rank: index + 1,
           faucetAddress: item.faucet_address,
-          faucetName: item.faucet_name,
+          faucetName: item.faucet_name, // Name comes directly from Supabase
           network: item.network,
           chainId: item.chain_id,
           totalClaims: item.claims,
@@ -619,7 +719,8 @@ export function UserClaimsChart() {
     }
 
     return false
-  }
+}
+
 
   useEffect(() => {
     loadStoredData().then((dataLoaded) => {

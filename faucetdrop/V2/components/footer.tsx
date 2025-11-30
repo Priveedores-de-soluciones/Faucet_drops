@@ -4,6 +4,7 @@ import React from "react"
 import { Github, Mail, Youtube } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Image from "next/image"
+import Link from "next/link"
 
 // Custom icons for X (Twitter) and Telegram since lucide-react doesn't have them
 const XIcon = ({ className }: { className?: string }) => (
@@ -69,43 +70,48 @@ export const Footer: React.FC<FooterProps> = ({ className = "" }) => {
   return (
     <footer className={`bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 mt-8 ${className}`}>
       <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
-          {/* Logo and Brand */}
-          <div className="flex items-center gap-2">
-              
+        <div className="flex flex-row items-center justify-between gap-3 sm:gap-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
+            {/* Logo and Brand */}
+            <div className="flex lg:flex-row max-lg:flex-col items-center gap-2">
+              <div className="flex items-center gap-2">
                 <div className="flex-shrink-0">
-                                    <Image
-                                      src="/logo.png"
-                                      alt="FaucetDrops Logo"
-                                      width={32}
-                                      height={32}
-                                      className="w-7 h-7 sm:w-8 sm:h-8 lg:w-10 lg:h-10 rounded-md object-contain"
-                                    />
-              
+                  <Image
+                    src="/logo.png"
+                    alt="FaucetDrops Logo"
+                    width={32}
+                    height={32}
+                    className="w-7 h-7 sm:w-8 sm:h-8 lg:w-10 lg:h-10 rounded-md object-contain"
+                  />
+
+                </div>
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  FaucetDrops
+                </h3>
+              </div>
+              <span className="hidden sm:inline text-xs text-slate-500 dark:text-slate-400 ml-1">
+                Free, Fast, Fair & Frictionless Token Distribution 💧
+              </span>
             </div>
-            <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              FaucetDrops
-            </h3>
-            <span className="hidden sm:inline text-xs text-slate-500 dark:text-slate-400 ml-1">
-              Free, Fast, Fair & Frictionless Token Distribution 💧
-            </span>
-          </div>
-             {/* Copyright and Links */}
-          <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-3 text-xs text-slate-500 dark:text-slate-400">
-            <span className="whitespace-nowrap">© 2025 FaucetDrops</span>
-            <div className="flex items-center gap-2 sm:gap-3">
-              <a 
-                href="/privacy" 
-                className="hover:text-slate-700 dark:hover:text-slate-300 transition-colors whitespace-nowrap"
-              >
-                Privacy
-              </a>
-              <a 
-                href="/terms" 
-                className="hover:text-slate-700 dark:hover:text-slate-300 transition-colors whitespace-nowrap"
-              >
-                Terms
-              </a>
+            {/* Copyright and Links */}
+            <div className="flex flex-row items-center gap-1 sm:gap-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
+              <div className="whitespace-nowrap">
+                &copy; {new Date().getFullYear()} FaucetDrops
+                {/* <span className="flex items-center gap-2 sm:gap-3"> */}
+                  <Link
+                    href="/privacy"
+                    className="hover:text-slate-700 dark:hover:text-slate-300 transition-colors whitespace-nowrap"
+                  >
+                    Privacy
+                  </Link>
+                  <Link
+                    href="/terms"
+                    className="hover:text-slate-700 dark:hover:text-slate-300 transition-colors whitespace-nowrap"
+                  >
+                    Terms
+                  </Link>
+                {/* </span> */}
+              </div>
             </div>
           </div>
           {/* Social Links */}
@@ -120,7 +126,7 @@ export const Footer: React.FC<FooterProps> = ({ className = "" }) => {
                   asChild
                   className={`h-7 w-7 p-0 text-slate-500 dark:text-slate-400 transition-colors ${link.hoverColor}`}
                 >
-                  <a
+                  <Link
                     href={link.href}
                     target="_blank"
                     rel="noopener noreferrer"
@@ -128,13 +134,13 @@ export const Footer: React.FC<FooterProps> = ({ className = "" }) => {
                     title={link.name}
                   >
                     <IconComponent className="h-3.5 w-3.5" />
-                  </a>
+                  </Link>
                 </Button>
               )
             })}
           </div>
 
-         
+
         </div>
       </div>
     </footer>

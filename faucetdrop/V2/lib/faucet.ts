@@ -12,17 +12,23 @@ interface Network {
   color: string
   storageAddress?: string // Optional, defaults to FAUCET_STORAGE_ADDRESS
 }
-
+interface FaucetMeta {
+    faucetAddress: string;
+    isClaimActive: boolean;
+    isEther: boolean;
+    createdAt: number | string;
+    tokenSymbol?: string;
+    name?: string;
+    owner?: string;
+    factoryAddress: string; // CRITICAL for step 2
+}
 // Factory type definitions
 type FactoryType = 'dropcode' | 'droplist' | 'custom'
 
 // Faucet type definitions (matches factory types)
 type FaucetType = 'dropcode' | 'droplist' | 'custom'
 
-interface FactoryConfig {
-  abi: any[]
-  createFunction: string
-}
+
 
 interface FaucetConfig {
   abi: any[]
@@ -42,15 +48,36 @@ function getFaucetConfig(faucetType: FaucetType): FaucetConfig {
   }
 }
 
+
+
+// Assuming these interfaces exist
+interface FactoryConfig {
+  abi: any; // Factory ABI
+  faucetAbi: any; // 💡 NEW: Faucet ABI
+  createFunction: string;
+}
+
 // Helper function to get the appropriate ABI and function based on factory type
 function getFactoryConfig(factoryType: FactoryType): FactoryConfig {
   switch (factoryType) {
     case 'dropcode':
-      return { abi: FACTORY_ABI_DROPCODE, createFunction: 'createBackendFaucet' }
+      return { 
+        abi: FACTORY_ABI_DROPCODE, 
+        faucetAbi: FAUCET_ABI_DROPCODE, // 💡 ADDED
+        createFunction: 'createBackendFaucet' 
+      }
     case 'droplist':
-      return { abi: FACTORY_ABI_DROPLIST, createFunction: 'createWhitelistFaucet' }
+      return { 
+        abi: FACTORY_ABI_DROPLIST, 
+        faucetAbi: FAUCET_ABI_DROPLIST, // 💡 ADDED
+        createFunction: 'createWhitelistFaucet' 
+      }
     case 'custom':
-      return { abi: FACTORY_ABI_CUSTOM, createFunction: 'createCustomFaucet' }
+      return { 
+        abi: FACTORY_ABI_CUSTOM, 
+        faucetAbi: FAUCET_ABI_CUSTOM, // 💡 ADDED
+        createFunction: 'createCustomFaucet' 
+      }
     default:
       throw new Error(`Unknown factory type: ${factoryType}`)
   }
@@ -63,7 +90,43 @@ function determineFactoryType(useBackend: boolean, isCustom: boolean = false): F
   }
   return useBackend ? 'dropcode' : 'droplist'
 }
+// 1. Define the specific type for the 'deleted' method
+type DeletedMethod = () => Promise<boolean>;
 
+// The helper function to check the on-chain 'deleted' state variable
+async function isFaucetDeleted(
+    provider: JsonRpcProvider,
+    faucetAddress: string,
+    factoryType: FactoryType // Assuming FaucetType is equivalent to FactoryType here
+): Promise<boolean> {
+    try {
+        const config = getFactoryConfig(factoryType);
+        // We need the FAUCET_ABI here, which is assumed to be in config.faucetAbi
+        // Note: I will update getFactoryConfig definition to include faucetAbi
+        const faucetContract = new Contract(faucetAddress, config.faucetAbi, provider);
+        
+        // 2. Safely cast the contract method using Type Assertion
+        const deletedFn = faucetContract['deleted'] as DeletedMethod;
+
+        // 3. Call the function
+        const isDeleted = await deletedFn();
+        
+        return isDeleted;
+    } catch (error) {
+        // Fallback logic remains: if RPC call fails, check if contract code exists.
+        // This handles cases where the contract was truly self-destructed.
+        console.warn(`Error checking deleted status for ${faucetAddress}. Checking bytecode fallback.`, error);
+
+        try {
+            const code = await provider.getCode(faucetAddress);
+            if (code === "0x") return true; 
+        } catch (e) {
+            // Ignore code check error
+        }
+        
+        return false;
+    }
+}
 // Helper function to detect factory type by trying different function calls
 async function detectFactoryType(provider: BrowserProvider | JsonRpcProvider, factoryAddress: string): Promise<FactoryType> {
   const factoryTypes: FactoryType[] = ['dropcode', 'droplist', 'custom']
@@ -89,6 +152,33 @@ async function detectFactoryType(provider: BrowserProvider | JsonRpcProvider, fa
   // Default to dropcode if detection fails
   console.warn(`Could not detect factory type for ${factoryAddress}, defaulting to dropcode`)
   return 'dropcode'
+}
+
+export async function getFaucetDetailsFromFactory(
+    factoryAddress: string, // Needed to determine type/ABI later if not cached
+    faucetAddress: string,
+    provider: BrowserProvider | JsonRpcProvider
+): Promise<any> {
+    try {
+        console.log(`[getFaucetDetailsFromFactory] Fetching full details for ${faucetAddress} from factory ${factoryAddress}`);
+
+        // 1. Detect faucet type using the known factory address (this is a shortcut)
+        const factoryType = await detectFactoryType(provider, factoryAddress);
+        const faucetType = factoryType as FaucetType;
+
+        // 2. Call the existing getFaucetDetails function, passing the detected type
+        const details = await getFaucetDetails(provider, faucetAddress, faucetType);
+
+        // 3. Return the full details, including the factory address for context
+        return {
+            ...details,
+            factoryAddress: factoryAddress,
+            faucetType: faucetType,
+        };
+    } catch (error) {
+        console.error(`Error in getFaucetDetailsFromFactory for ${faucetAddress}:`, error);
+        throw error;
+    }
 }
 
 // Helper function to detect faucet type by trying different ABIs
@@ -1361,94 +1451,84 @@ export async function getFaucetDetails(
   }
 }
 
+export async function getFaucetsForNetwork(
+    network: Network,
+    provider: JsonRpcProvider
+): Promise<FaucetMeta[]> {
+    try {
+        let allFaucetsMeta: FaucetMeta[] = [];
 
-
-export async function getFaucetsForNetwork(network: Network): Promise<any[]> {
-  try {
-    const provider = new JsonRpcProvider(network.rpcUrl)
-    let allFaucets: any[] = []
-
-    // Fetch faucets from all factory addresses
-    for (const factoryAddress of network.factoryAddresses) {
-      if (!isAddress(factoryAddress)) {
-        console.warn(`Invalid factory address ${factoryAddress} on ${network.name}, skipping`);
-        continue;
-      }
-
-      // Detect factory type and get appropriate ABI
-      let factoryType: FactoryType;
-      let config: FactoryConfig;
-      
-      try {
-        factoryType = await detectFactoryType(provider, factoryAddress);
-        config = getFactoryConfig(factoryType);
-        console.log(`Detected factory type for ${factoryAddress}: ${factoryType}`);
-      } catch (error) {
-        console.warn(`Could not detect factory type for ${factoryAddress}, skipping:`, error);
-        continue;
-      }
-
-      const factoryContract = new Contract(factoryAddress, config.abi, provider)
-
-      // Check if factory contract exists
-      const code = await provider.getCode(factoryAddress)
-      if (code === "0x") {
-        console.warn(`No contract at factory address ${factoryAddress} on ${network.name}`)
-        continue
-      }
-
-      // Fetch all faucet addresses for this factory
-      let faucetAddresses: string[] = []
-      try {
-        faucetAddresses = await factoryContract.getAllFaucets()
-      } catch (error) {
-        console.error(`Error calling getAllFaucets for ${factoryAddress} on ${network.name}:`, error)
-        continue
-      }
-
-      // Process each faucet address to get full details
-      const results = await Promise.all(
-        faucetAddresses.map(async (faucetAddress: string) => {
-          if (!faucetAddress || faucetAddress === ZeroAddress) return null
-          try {
-            // Use the factory type to determine faucet type (they should match)
-            const faucetType = factoryType as FaucetType
-            const faucetConfig = getFaucetConfig(faucetType)
-            const faucetContract = new Contract(faucetAddress, faucetConfig.abi, provider)
+        // Fetch faucets from all factory addresses in parallel
+        const resultsPromises = network.factoryAddresses.map(async (factoryAddress) => {
+            if (!isAddress(factoryAddress)) return [];
             
-            const isDeleted = await faucetContract.deleted()
-            if (isDeleted) {
-              console.log(`Faucet ${faucetAddress} is deleted, skipping`)
-              return null
-            }
+            try {
+                const factoryType = await detectFactoryType(provider, factoryAddress);
+                const config = getFactoryConfig(factoryType);
+                const factoryContract = new Contract(factoryAddress, config.abi, provider);
 
-            const details = await getFaucetDetails(provider, faucetAddress, faucetType)
-            return {
-              ...details,
-              network: {
-                chainId: network.chainId,
-                name: network.name,
-                color: network.color,
-                blockExplorer: network.blockExplorer,
-              },
-              factoryAddress, // Include factory address for reference
-              factoryType, // Include factory type for reference
-            }
-          } catch (error) {
-            console.warn(`Error getting details for faucet ${faucetAddress} on ${network.name}:`, error)
-            return null
-          }
-        }),
-      )
+                const factoryCode = await provider.getCode(factoryAddress);
+                if (factoryCode === "0x") return [];
 
-      allFaucets.push(...results.filter((result) => result !== null))
+                // 1. Fetch all faucet addresses
+                const faucetAddresses: string[] = await factoryContract.getAllFaucets();
+
+                // 2. Fetch all necessary details in parallel, INCLUDING deleted status.
+                const metaPromises = faucetAddresses.map(async (addr) => {
+                    if (!addr || addr === ZeroAddress) return null;
+                    
+                    // Call the two necessary view functions: details + deleted status
+                    const [details, isDeleted] = await Promise.all([
+                        // Function 1: Get the FaucetMeta fields
+                        getFaucetDetails(provider, addr, factoryType as FaucetType),
+                        
+                        // ⭐️ Function 2: Check the on-chain 'deleted' state variable
+                        isFaucetDeleted(provider, addr, factoryType as FaucetType),
+                    ]);
+
+                    // 🛑 NEW FILTER CONDITION
+                    if (isDeleted) {
+                        return null; // Skip this faucet
+                    }
+
+                    return {
+                        faucetAddress: details.faucetAddress,
+                        isClaimActive: details.isClaimActive,
+                        isEther: details.isEther,
+                        createdAt: BigInt(details.startTime).toString(), 
+                        tokenSymbol: details.tokenSymbol,
+                        name: details.name,
+                        owner: details.owner,
+                        factoryAddress: factoryAddress, // CRITICAL
+                    } as FaucetMeta;
+                });
+                
+                // Filter out the null results (the deleted faucets)
+                const metaResults = (await Promise.all(metaPromises)).filter(m => m !== null) as FaucetMeta[];
+                
+                return metaResults;
+
+            } catch (error) {
+                console.error(`Error during lightweight fetch for factory ${factoryAddress}:`, error);
+                return [];
+            }
+        });
+
+        const allResults = await Promise.all(resultsPromises);
+        allFaucetsMeta = allResults.flat();
+        
+        // Remove duplicates in case two factories point to the same faucet address
+        const uniqueFaucets = allFaucetsMeta.filter((faucet, index, self) =>
+            index === self.findIndex((t) => (
+                t.faucetAddress === faucet.faucetAddress
+            ))
+        );
+
+        return uniqueFaucets;
+    } catch (error) {
+        console.error(`Error in getFaucetsForNetwork (lightweight aggregation):`, error);
+        return [];
     }
-
-    return allFaucets
-  } catch (error) {
-    console.error(`Error fetching faucets for ${network.name}:`, error)
-    return []
-  }
 }
 
 // Fetch transaction history for a specific faucet (admin only)
@@ -1884,7 +1964,7 @@ export async function retrieveSecretCode(faucetAddress: string): Promise<string>
     }
 
     // Fallback to backend if not found in localStorage
-    const response = await fetch("http://0.0.0.0:10000/retrieve-secret-code", {
+    const response = await fetch("https://fauctdrop-backend.onrender.com/retrieve-secret-code", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -2070,7 +2150,7 @@ export async function fundFaucet(
   if (!checkNetwork(chainId, networkId)) {
     throw new Error("Switch to the network to perform operation")
   }
-
+  
   try {
     const signer = await provider.getSigner()
     const signerAddress = await signer.getAddress()
@@ -2080,7 +2160,7 @@ export async function fundFaucet(
     
     const faucetContract = new Contract(faucetAddress, config.abi, signer)
     const isCelo = isCeloNetwork(chainId)
-
+    
     console.log("Funding params:", {
       faucetAddress,
       amount: amount.toString(),
@@ -2089,15 +2169,48 @@ export async function fundFaucet(
       networkId: networkId.toString(),
       signerAddress,
     })
-
+    
+    // Helper function to get gas parameters
+    const getGasParams = async () => {
+      try {
+        const feeData = await provider.getFeeData()
+        
+        if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+          // EIP-1559
+          return {
+            maxFeePerGas: feeData.maxFeePerGas,
+            maxPriorityFeePerGas: feeData.maxPriorityFeePerGas,
+          }
+        } else if (feeData.gasPrice) {
+          // Legacy
+          return {
+            gasPrice: feeData.gasPrice,
+          }
+        }
+        return {}
+      } catch (error) {
+        console.warn("Could not fetch fee data, using defaults:", error)
+        return {}
+      }
+    }
+    
     if (isEther && !isCelo) {
       console.log(`Funding faucet ${faucetAddress} with ${amount} native tokens on chain ${chainId}`)
       
-      // Simplified native token transfer
+      const gasParams = await getGasParams()
+      const gasLimit = await provider.estimateGas({
+        to: faucetAddress,
+        from: signerAddress,
+        value: amount,
+        data: "0x",
+      })
+      
       const tx = await signer.sendTransaction({
         to: faucetAddress,
         value: amount,
         data: "0x",
+        gasLimit: gasLimit,
+        ...gasParams,
       })
       
       console.log("Transaction hash:", tx.hash)
@@ -2109,43 +2222,96 @@ export async function fundFaucet(
       await reportTransactionToDivvi(tx.hash as `0x${string}`, Number(chainId))
       return tx.hash
     }
-
+    
     const tokenAddress =
       isEther && isCelo
         ? "0x471EcE3750Da237f93B8E339c536989b8978a438" // Wrapped CELO
         : await faucetContract.token()
-
+    
     if (tokenAddress === ZeroAddress) {
       throw new Error("Token address is zero, cannot proceed with ERC-20 transfer")
     }
-
+    
     const tokenContract = new Contract(tokenAddress, ERC20_ABI, signer)
-    console.log(`Approving ${amount} ${isEther && isCelo ? "CELO" : "tokens"} for faucet ${faucetAddress}`)
-
-    const approveData = tokenContract.interface.encodeFunctionData("approve", [faucetAddress, amount])
-    const approveDataWithReferral = appendDivviReferralData(approveData)
     
-    // Simplified approve transaction
-    const approveTx = await signer.sendTransaction({
-      to: tokenAddress,
-      data: approveDataWithReferral,
-    })
+    // Check current allowance first
+    console.log("Checking current allowance...")
+    const currentAllowance = await tokenContract.allowance(signerAddress, faucetAddress)
     
-    const approveReceipt = await approveTx.wait()
-    if (!approveReceipt) {
-      throw new Error("Approve transaction receipt is null")
+    if (currentAllowance >= amount) {
+      console.log("Sufficient allowance already exists, skipping approve")
+    } else {
+      console.log(`Approving ${amount} ${isEther && isCelo ? "CELO" : "tokens"} for faucet ${faucetAddress}`)
+      
+      // Reset allowance to 0 if needed (some tokens require this)
+      if (currentAllowance > 0n) {
+        console.log("Resetting allowance to 0 first...")
+        const resetData = tokenContract.interface.encodeFunctionData("approve", [faucetAddress, 0n])
+        const resetDataWithReferral = appendDivviReferralData(resetData)
+        
+        const gasParams = await getGasParams()
+        const resetGasLimit = await provider.estimateGas({
+          to: tokenAddress,
+          from: signerAddress,
+          data: resetDataWithReferral,
+        })
+        
+        const resetTx = await signer.sendTransaction({
+          to: tokenAddress,
+          data: resetDataWithReferral,
+          gasLimit: resetGasLimit,
+          ...gasParams,
+        })
+        
+        const resetReceipt = await resetTx.wait()
+        if (!resetReceipt) {
+          throw new Error("Reset allowance transaction receipt is null")
+        }
+        console.log("Reset allowance confirmed:", resetReceipt.hash)
+      }
+      
+      const approveData = tokenContract.interface.encodeFunctionData("approve", [faucetAddress, amount])
+      const approveDataWithReferral = appendDivviReferralData(approveData)
+      
+      const gasParams = await getGasParams()
+      const approveGasLimit = await provider.estimateGas({
+        to: tokenAddress,
+        from: signerAddress,
+        data: approveDataWithReferral,
+      })
+      
+      const approveTx = await signer.sendTransaction({
+        to: tokenAddress,
+        data: approveDataWithReferral,
+        gasLimit: approveGasLimit,
+        ...gasParams,
+      })
+      
+      console.log("Approve transaction hash:", approveTx.hash)
+      const approveReceipt = await approveTx.wait()
+      if (!approveReceipt) {
+        throw new Error("Approve transaction receipt is null")
+      }
+      console.log("Approve transaction confirmed:", approveReceipt.hash)
+      await reportTransactionToDivvi(approveTx.hash as `0x${string}`, Number(chainId))
     }
-    console.log("Approve transaction confirmed:", approveReceipt.hash)
-    await reportTransactionToDivvi(approveTx.hash as `0x${string}`, Number(chainId))
-
+    
     console.log(`Funding faucet ${faucetAddress} with ${amount} ${isEther && isCelo ? "CELO" : "tokens"}`)
     const fundData = faucetContract.interface.encodeFunctionData("fund", [amount])
     const fundDataWithReferral = appendDivviReferralData(fundData)
     
-    // Simplified fund transaction
+    const gasParams = await getGasParams()
+    const fundGasLimit = await provider.estimateGas({
+      to: faucetAddress,
+      from: signerAddress,
+      data: fundDataWithReferral,
+    })
+    
     const fundTx = await signer.sendTransaction({
       to: faucetAddress,
       data: fundDataWithReferral,
+      gasLimit: fundGasLimit,
+      ...gasParams,
     })
     
     console.log("Fund transaction hash:", fundTx.hash)
@@ -2156,15 +2322,32 @@ export async function fundFaucet(
     console.log("Fund transaction confirmed:", fundReceipt.hash)
     await reportTransactionToDivvi(fundTx.hash as `0x${string}`, Number(chainId))
     return fundTx.hash
+    
   } catch (error: any) {
     console.error("Error funding faucet:", error)
+    
+    // Enhanced error handling
     if (error.message?.includes("network changed")) {
       throw new Error("Network changed during transaction. Please try again with a stable network connection.")
     }
-    throw new Error(error.reason || error.message || "Failed to fund faucet")
+    
+    if (error.code === "INSUFFICIENT_FUNDS") {
+      throw new Error("Insufficient funds to complete the transaction including gas fees.")
+    }
+    
+    if (error.message?.includes("user rejected")) {
+      throw new Error("Transaction was rejected by user.")
+    }
+    
+    if (error.message?.includes("RPC endpoint")) {
+      throw new Error("RPC endpoint error. Please check your network connection and try again.")
+    }
+    
+    // Extract useful error message
+    const errorMessage = error.reason || error.message || "Failed to fund faucet"
+    throw new Error(errorMessage)
   }
 }
-
 export async function withdrawTokens(
   provider: BrowserProvider,
   faucetAddress: string,

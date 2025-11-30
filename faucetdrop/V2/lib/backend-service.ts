@@ -1,7 +1,8 @@
 import { BrowserProvider } from 'ethers';
 import { appendDivviReferralData, reportTransactionToDivvi } from './divvi-integration';
+import { FAUCET_ABI_CUSTOM } from './abis';
 
-//const API_URL = "http://0.0.0.0:10000"; // Update with your backend URL
+//const API_URL = "https://fauctdrop-backend.onrender.com"; // Update with your backend URL
 const API_URL = "https://fauctdrop-backend.onrender.com"; // Uncomment for production
 const ENABLE_DIVVI_REFERRAL = true;
 const DEBUG_MODE = process.env.NODE_ENV === 'development';
@@ -785,23 +786,7 @@ export async function checkCustomAllocation(
     
     // You'll need to import the FAUCET_ABI_CUSTOM from your abis file
     // This is a placeholder - replace with your actual custom ABI import
-    const FAUCET_ABI_CUSTOM = [
-      // Add your custom faucet ABI here or import it
-      {
-        "inputs": [{"internalType": "address", "name": "user", "type": "address"}],
-        "name": "hasCustomClaimAmount",
-        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
-        "stateMutability": "view",
-        "type": "function"
-      },
-      {
-        "inputs": [{"internalType": "address", "name": "user", "type": "address"}],
-        "name": "getCustomClaimAmount",
-        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-        "stateMutability": "view",
-        "type": "function"
-      }
-    ];
+   
 
     const faucetContract = new Contract(faucetAddress, FAUCET_ABI_CUSTOM, provider);
     

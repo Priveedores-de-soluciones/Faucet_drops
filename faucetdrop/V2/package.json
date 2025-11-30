@@ -38,8 +38,8 @@
     "@radix-ui/react-toggle": "1.1.1",
     "@radix-ui/react-toggle-group": "1.1.1",
     "@radix-ui/react-tooltip": "1.1.6",
-    "@reown/appkit": "^1.8.9",
-    "@reown/appkit-adapter-wagmi": "^1.8.9",
+    "@reown/appkit": "^1.8.14",
+    "@reown/appkit-adapter-wagmi": "^1.8.14",
     "@reown/appkit-common": "^1.8.9",
     "@reown/appkit-universal-connector": "^1.8.9",
     "@selfxyz/core": "1.0.7-beta.1",
@@ -62,6 +62,8 @@
     "lucide-react": "^0.454.0",
     "next": "15.2.4",
     "next-themes": "^0.4.4",
+    "pdf-parse": "^2.4.3",
+    "pdfjs-dist": "^5.4.296",
     "qrcode.react": "^4.2.0",
     "react": "^19.1.0",
     "react-day-picker": "8.10.1",
@@ -76,6 +78,7 @@
     "vaul": "^0.9.6",
     "viem": "latest",
     "wagmi": "latest",
+    "xlsx": "^0.18.5",
     "zod": "^3.24.1"
   },
   "devDependencies": {

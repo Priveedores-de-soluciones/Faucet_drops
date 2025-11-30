@@ -108,10 +108,6 @@ export function NetworkSelector({
   
   const isWalletAvailable = typeof window !== "undefined" && window.ethereum
   const hasWalletConnected = isConnected && !!address
-  // const currentChainId = chainId
-
-  console.log("++++++++++++chainId+++++++++", chainId)
-  console.log("++++++++++++networks+++++++++", networks)
   
   const currentNetwork = networks.find((net) => net.chainId === chainId)
   

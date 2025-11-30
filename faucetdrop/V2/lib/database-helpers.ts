@@ -115,7 +115,7 @@ export class DataService {
       if (error) throw error
       return data || []
     } catch (error) {
-      console.error('Error loading user data from Supabase:', error)
+      console.log('Error loading user data from Supabase:', error)
       return []
     }
   }

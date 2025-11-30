@@ -27,10 +27,7 @@ export function WalletConnectButton({ className }: WalletConnectButtonProps) {
     <Button 
       onClick={handleClick}
       size="sm"
-      className={cn(
-        "w-full sm:w-auto flex items-center justify-center gap-2",
-        className
-      )}
+      className="w-full flex items-center justify-center gap-2"
     >
       <Wallet className="h-4 w-4 flex-shrink-0" />
       <span className="hidden xs:inline">
