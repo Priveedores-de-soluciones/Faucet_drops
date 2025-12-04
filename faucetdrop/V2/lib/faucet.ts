@@ -1,9 +1,9 @@
-import { type BrowserProvider, Contract, JsonRpcProvider, ZeroAddress, isAddress, getAddress } from "ethers"
+import {Interface, type BrowserProvider, Contract, JsonRpcProvider, ZeroAddress, isAddress, getAddress } from "ethers"
 import { FAUCET_ABI_DROPCODE, FAUCET_ABI_CUSTOM, FAUCET_ABI_DROPLIST, ERC20_ABI, CHECKIN_ABI, FACTORY_ABI_DROPCODE, FACTORY_ABI_DROPLIST, FACTORY_ABI_CUSTOM, STORAGE_ABI} from "./abis"
 import { appendDivviReferralData, reportTransactionToDivvi, getDivviStatus, isSupportedNetwork } from "./divvi-integration"
 
 // Fetch faucets for a specific network using getAllFaucets and getFaucetDetails
-interface Network {
+ interface Network {
   chainId: bigint
   name: string
   rpcUrl: string
@@ -23,7 +23,7 @@ interface FaucetMeta {
     factoryAddress: string; // CRITICAL for step 2
 }
 // Factory type definitions
-type FactoryType = 'dropcode' | 'droplist' | 'custom'
+export type FactoryType = 'dropcode' | 'droplist' | 'custom'
 
 // Faucet type definitions (matches factory types)
 type FaucetType = 'dropcode' | 'droplist' | 'custom'
@@ -298,7 +298,7 @@ interface FaucetDetails {
   useBackend: boolean;
 }
 
-interface NameValidationResult {
+export interface NameValidationResult {
   exists: boolean;
   existingFaucet?: { 
     address: string; 
@@ -624,6 +624,97 @@ export async function fetchStorageData(): Promise<
 
     return []
   }
+}
+
+export async function createCustomFaucet(
+    provider: BrowserProvider,
+    factoryAddress: string,
+    questName: string,
+    tokenAddress: string,
+): Promise<string> {
+    
+    // --- 1. Basic Validation ---
+    if (!isAddress(factoryAddress) || !isAddress(tokenAddress)) {
+        throw new Error(`Invalid factory or token address provided.`);
+    }
+    if (!provider) {
+        throw new Error("Ethers provider is not available.");
+    }
+
+    try {
+        const factoryType: FactoryType = 'custom';
+        // NOTE: getFactoryConfig must be a defined helper in faucet.ts
+        const config = getFactoryConfig(factoryType); 
+
+        // --- 2. Setup Signer and Contract ---
+        const signer = await provider.getSigner();
+        // NOTE: VALID_BACKEND_ADDRESS must be defined/imported in faucet.ts
+        const backendAddress = VALID_BACKEND_ADDRESS; 
+        
+        // Factory Contract using the Signer for a write transaction
+        const factoryContract = new Contract(factoryAddress, config.abi, signer);
+
+        // --- 3. Encode Transaction Data ---
+        // Assumes createCustomFaucet expects (string name, address token, address backend)
+        const data = factoryContract.interface.encodeFunctionData(config.createFunction, [
+            questName,
+            tokenAddress,
+            backendAddress,
+        ]);
+        
+        // NOTE: If 'appendDivviReferralData' is used, uncomment and ensure it's defined/imported.
+        // const dataWithReferral = appendDivviReferralData(data);
+        const dataWithReferral = data; // Placeholder if referral is not used here
+
+        console.log(`[faucet.ts: createCustomFaucet] Sending deployment transaction for ${questName}...`);
+        
+        // --- 4. Send Transaction ---
+        const tx = await signer.sendTransaction({
+            to: factoryAddress,
+            data: dataWithReferral,
+            // Gas estimation is typically omitted here, letting the wallet handle it, 
+            // but can be added back if needed for specific chains.
+        });
+
+        // --- 5. Wait for Confirmation and Parse Event ---
+        const receipt = await tx.wait();
+        if (!receipt) {
+            throw new Error("Transaction receipt is null.");
+        }
+        
+        let newFaucetAddress: string | null = null;
+        const factoryInterface = new Interface(config.abi);
+
+        if (receipt.logs) {
+            for (const log of receipt.logs) {
+                try {
+                    const parsedLog = factoryInterface.parseLog(log as any);
+                    if (parsedLog && parsedLog.name === 'FaucetCreated') {
+                        newFaucetAddress = parsedLog.args.faucet;
+                        break;
+                    }
+                } catch (e) { /* ignore unrelated logs */ }
+            }
+        }
+        
+        if (newFaucetAddress) {
+            console.log(`✅ New faucet deployed at: ${newFaucetAddress}`);
+            return newFaucetAddress;
+        }
+        
+        // This is a critical error path: the transaction confirmed but the event wasn't found.
+        throw new Error("Deployment succeeded, but the FaucetCreated event was not found in logs.");
+
+    } catch (error: any) {
+        console.error('❌ Error deploying custom faucet (faucet.ts):', error);
+        
+        // NOTE: The decodeRevertError logic should be included if you need custom error decoding.
+        // if (error.data && typeof error.data === "string") {
+        //     throw new Error(decodeRevertError(error.data));
+        // }
+        
+        throw new Error(error.reason || error.message || "Failed to deploy custom faucet");
+    }
 }
 
 export async function checkFaucetNameExistsAcrossAllFactories(
