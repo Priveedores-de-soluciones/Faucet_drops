@@ -1,3 +1,4 @@
+// src/pages/ManualVerificationPage.tsx
 "use client"
 import React, { useState, useEffect, useCallback } from 'react'
 import { Button } from "@/components/ui/button"
@@ -13,34 +14,33 @@ import {
   Link as LinkIcon,
   Upload
 } from "lucide-react"
-import { Header } from '@/components/header'
 import { useWallet } from "@/hooks/use-wallet" 
 import { useNetwork } from "@/hooks/use-network" 
-import { toast } from "@/hooks/use-toast" // Assuming you have a useToast hook
+// import { toast } from "@/hooks/use-toast" // Assuming useToast hook
+const toast = console.log; // Using console.log as mock toast
 
 // --- CONSTANTS ---
 const API_BASE_URL = "https://fauctdrop-backend.onrender.com"
 
 // --- Data Structures ---
-
-// Simplified structure for displaying Quest info
 interface QuestSummary {
     id: string;
     title: string;
     faucetAddress: string;
 }
-
-// Structure for a pending submission entry
 interface Submission {
     id: string;
     userId: string;
     taskId: string;
     taskTitle: string;
     proofType: 'manual_link' | 'manual_upload';
-    proofData: string; // The URL/Link/Filename of the proof
+    proofData: string;
     status: 'pending';
     points: number;
 }
+
+// NOTE: Mock Header component since the source wasn't provided for this utility
+const Header = ({ pageTitle }: { pageTitle: string }) => <h1 className="text-3xl font-bold">{pageTitle}</h1>;
 
 export default function ManualVerificationPage() {
     const { address, isConnected, chainId } = useWallet(); 
@@ -55,7 +55,7 @@ export default function ManualVerificationPage() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [pageError, setPageError] = useState<string | null>(null);
 
-    // 1. Fetch Quests belonging to the owner
+    // 1. Fetch Quests belonging to the owner (LIVE API CALL)
     useEffect(() => {
         if (!address || !isConnected || isNetworkConnecting) {
             setQuests([]);
@@ -91,7 +91,7 @@ export default function ManualVerificationPage() {
     }, [address, isConnected, isNetworkConnecting]);
     
 
-    // 2. Fetch submissions for the selected quest
+    // 2. Fetch submissions for the selected quest (LIVE API CALL)
     const fetchSubmissions = useCallback(async () => {
         if (!selectedQuestId) {
             setSubmissions([]);
@@ -119,7 +119,7 @@ export default function ManualVerificationPage() {
     }, [fetchSubmissions]);
 
 
-    // 3. Handle Verification Action (Approve/Reject)
+    // 3. Handle Verification Action (Approve/Reject) (LIVE API CALL)
     const handleVerification = async (submissionId: string, status: 'approved' | 'rejected', points: number) => {
         if (isProcessing) return;
 
@@ -297,10 +297,8 @@ export default function ManualVerificationPage() {
                                             +{submission.points} Points
                                         </Badge>
                                         <div className="flex gap-2">
-                                            
-                                               
                                             <Button
-                                                 variant="success"
+                                                 className="bg-green-500 hover:bg-green-600"
                                                 size="sm"
                                                 onClick={() => handleVerification(submission.id, 'approved', submission.points)}
                                                 disabled={isProcessing}
@@ -308,7 +306,7 @@ export default function ManualVerificationPage() {
                                                 <Check className="h-4 w-4 mr-1" /> Approve
                                             </Button>
                                             <Button
-                                                variant="destructive"
+                                                className="bg-red-500 hover:bg-red-600"
                                                 size="sm"
                                                 onClick={() => handleVerification(submission.id, 'rejected', 0)}
                                                 disabled={isProcessing}

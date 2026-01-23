@@ -157,7 +157,7 @@ export default function Home() {
     
     try {
       await new Promise(resolve => setTimeout(resolve, 100)) // Small delay for UX
-      router.push('/create')
+      router.push('faucet/create-faucet')
     } catch (error) {
       console.error('Navigation error:', error)
       setIsNavigatingToCreate(false)
@@ -260,27 +260,7 @@ export default function Home() {
           {/* Header Section */}
           <Head />
 
-          {/* User Info Card (for mobile) */}
-          {isConnected && address && (
-            <div className="lg:hidden bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-3 sm:p-4">
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Wallet</span>
-                </div>
-                <p className="text-xs text-slate-600 dark:text-slate-300 font-mono break-all">
-                  {address}
-                </p>
-                {currentNetwork && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-slate-500 dark:text-slate-400">Network</span>
-                    <span className="text-xs px-2 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 rounded-full capitalize whitespace-nowrap">
-                      {currentNetwork}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+         
 
           {/* Main Content */}
           <div className="flex flex-col gap-4 sm:gap-6 lg:gap-8">

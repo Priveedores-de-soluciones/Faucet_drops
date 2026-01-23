@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 'use client'
 import Image from "next/image";
 import { motion, useInView } from "framer-motion";
@@ -115,7 +116,7 @@ export default function Networks() {
         animate={isInView ? "show" : "hidden"}
       >
         <motion.h2 
-          className="text-xl font-bold text-white"
+          className="text-xl md:text-2xl lg:text-3xl xl:text-4xl font-bold text-white leading-relaxed"
           // variants={item}
         >
           The future of Web3 user acquisition is automated, verifiable and fun. We&apos;re building it!

@@ -84,7 +84,44 @@ const SORT_OPTIONS = {
 type FilterOption = typeof FILTER_OPTIONS[keyof typeof FILTER_OPTIONS];
 type SortOption = typeof SORT_OPTIONS[keyof typeof SORT_OPTIONS];
 
+// --- NEW UTILITY FUNCTION ---
 
+interface DeletedFaucetResponse {
+    success: boolean;
+    count: number;
+    deletedAddresses: string[];
+}
+
+/**
+ * Fetches the list of all faucet addresses marked as deleted in the off-chain database.
+ * @returns A promise that resolves to a Set of lowercase deleted faucet addresses.
+ */
+async function fetchDeletedFaucetsSet(): Promise<Set<string>> {
+    try {
+        // NOTE: Replace the URL below with your actual backend base URL if it differs
+        const response = await fetch("https://fauctdrop-backend.onrender.com/deleted-faucets");
+        
+        if (!response.ok) {
+            console.error("Backend failed to return deleted faucet list.");
+            return new Set();
+        }
+
+        const result: DeletedFaucetResponse = await response.json();
+        
+        if (result.success && result.deletedAddresses) {
+            // Convert all addresses to lowercase for case-insensitive checking
+            const deletedSet = new Set(result.deletedAddresses.map(addr => addr.toLowerCase()));
+            console.log(`Fetched ${deletedSet.size} deleted faucet addresses from backend for filtering.`);
+            return deletedSet;
+        }
+        return new Set();
+    } catch (error) {
+        console.error("Failed to fetch deleted faucet list from backend:", error);
+        return new Set();
+    }
+}
+
+// --- END: NEW UTILITY FUNCTION ---
 // --- UTILITY HOOKS AND HELPERS (Original Code) ---
 
 function useWindowSize() {
@@ -324,17 +361,9 @@ function FaucetCard({ faucet, onNetworkSwitch }: { faucet: FaucetData; onNetwork
               {faucet.network?.name || "Unknown"}
             </span>
           </div>
+          
           <div className="flex justify-between items-center gap-2">
-            <span className="text-muted-foreground">Balance:</span>
-            <span className="font-medium truncate">
-              {faucet.balance
-                ? Number(formatUnits(faucet.balance, faucet.tokenDecimals || 18)).toFixed(4)
-                : "0"}{" "}
-              {displayTokenSymbol}
-            </span>
-          </div>
-          <div className="flex justify-between items-center gap-2">
-            <span className="text-muted-foreground">Drop Amount:</span>
+            <span className="text-muted-foreground">Drip Amount:</span>
             <span className="font-medium truncate">
               {faucet.claimAmount
                 ? Number(formatUnits(faucet.claimAmount, faucet.tokenDecimals || 18)).toFixed(4)
@@ -564,7 +593,7 @@ export default function NetworkFaucets() {
 
 
   // 🌟 CORE FUNCTION 1: Load ALL Faucet Addresses/Minimal Metadata (FAST)
-  const loadAllFaucetsMetadata = useCallback(async () => {
+const loadAllFaucetsMetadata = useCallback(async () => {
     if (!network || isNaN(chainId)) return;
 
     setLoadingInitial(true);
@@ -572,12 +601,23 @@ export default function NetworkFaucets() {
     try {
         const networkProvider = new JsonRpcProvider(network.rpcUrl);
         
-        // 🌟 CRITICAL: This function must aggregate results from ALL network.factoryAddresses.
-        const metaList: FaucetMeta[] = await getFaucetsForNetwork(network, networkProvider);
+        // 1. Fetch the list of permanently deleted addresses from the backend
+        const deletedAddressesSet = await fetchDeletedFaucetsSet();
+
+        // 2. CRITICAL: This function must fetch ALL faucets on-chain without filtering,
+        // (assuming getFaucetsForNetwork in lib/faucet.ts calls factory.getAllFaucets()).
+        // We do the filtering here.
+        // NOTE: If your lib/faucet.ts implementation still includes the RPC check, remove it there.
+        const allFetchedMeta: FaucetMeta[] = await getFaucetsForNetwork(network, networkProvider);
         
-        setAllFaucetsMeta(metaList);
+        // 3. Filter the list using the off-chain database index
+        const activeMetaList = allFetchedMeta.filter(meta => {
+            return !deletedAddressesSet.has(meta.faucetAddress.toLowerCase());
+        });
+
+        setAllFaucetsMeta(activeMetaList);
         setPage(1); 
-        console.log(`✅ Total ${metaList.length} unique faucets loaded for ${network.name} from multiple factories.`);
+        console.log(`✅ Loaded ${allFetchedMeta.length} faucets. Filtered ${allFetchedMeta.length - activeMetaList.length} deleted faucets via backend check. Total active: ${activeMetaList.length}.`);
 
     } catch (error) {
         console.error("❌ Error loading all faucet metadata:", error);
@@ -586,8 +626,7 @@ export default function NetworkFaucets() {
     } finally {
         setLoadingInitial(false);
     }
-  }, [network, chainId, toast]);
-
+}, [network, chainId, toast]);
 
   // 🌟 CORE FUNCTION 2: Load Full Details for the Current Page (Heavy Fetch)
   const loadCurrentPageDetails = useCallback(async (

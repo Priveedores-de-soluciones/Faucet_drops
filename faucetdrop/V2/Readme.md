@@ -1,7 +1,3 @@
-Here's a simplified and community-focused version of your **Decentralized Faucet System** documentation. It keeps the essence of the technical content while making it easier for non-developers and community managers to understand:
-
----
-
 # 💧FaucetDrops
 
 A simple tool built to help **crypto and blockchain communities** distribute ETH or tokens easily to many people — without stress.

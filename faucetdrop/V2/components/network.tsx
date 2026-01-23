@@ -44,7 +44,7 @@ const StatusBadge = ({ status }: StatusBadgeProps) => {
   }
   return (
     <div className="flex items-center text-xs text-green-500">
-      <Zap className="mr-1 h-3 w-3 fill-green-500/20" />
+      <Zap className="mr-1 h-3 w-3 " />
       Online
     </div>
   );
@@ -198,14 +198,7 @@ export function NetworkGrid({ className = "" }: NetworkGridProps) {
                     {faucetCounts[currentNetwork.name] ?? 0}
                   </p>
                 </div>
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground">
-                    Currently Active
-                  </p>
-                  <p className="text-2xl font-extrabold text-green-500">
-                    {activeFaucetCounts[currentNetwork.name] ?? 0}
-                  </p>
-                </div>
+                
               </CardContent>
               <div className=" p-2 text-center text-xs text-primary/80 font-medium">
                 Click to explore available faucets on this network →

@@ -41,7 +41,7 @@ export default function SplashScreen() {
       <div className="flex flex-col items-center justify-center">
         <div className="animate-bounce">
           <Image
-            src="/white_FaucetDrops.png"
+            src="/logo.png"
             alt="FaucetDrops Logo"
             width={200}
             height={200}

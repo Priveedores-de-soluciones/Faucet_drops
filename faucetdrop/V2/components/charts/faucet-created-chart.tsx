@@ -26,7 +26,42 @@ const FAUCET_STORAGE_KEYS = {
 
 // Cache duration (5 minutes)
 const CACHE_DURATION = 5 * 60 * 1000;
+// --- NEW INTERFACE AND UTILITY FUNCTION ---
 
+interface DeletedFaucetResponse {
+    success: boolean;
+    count: number;
+    deletedAddresses: string[];
+}
+
+/**
+ * Fetches the list of all faucet addresses marked as deleted in the off-chain database.
+ * @returns A promise that resolves to a Set of lowercase deleted faucet addresses.
+ */
+async function fetchDeletedFaucetsSet(): Promise<Set<string>> {
+    try {
+        const response = await fetch("https://fauctdrop-backend.onrender.com/deleted-faucets");
+        
+        if (!response.ok) {
+            console.error("Backend failed to return deleted faucet list.");
+            return new Set();
+        }
+
+        const result: DeletedFaucetResponse = await response.json();
+        
+        if (result.success && result.deletedAddresses) {
+            // Convert all addresses to lowercase for case-insensitive checking
+            const deletedSet = new Set(result.deletedAddresses.map(addr => addr.toLowerCase()));
+            return deletedSet;
+        }
+        return new Set();
+    } catch (error) {
+        console.error("Failed to fetch deleted faucet list from backend:", error);
+        return new Set();
+    }
+}
+
+// --- END: NEW UTILITY FUNCTION ---
 // Helper functions for localStorage
 function saveToLocalStorage(key: string, data: any) {
   try {
@@ -68,7 +103,9 @@ export function FaucetsCreatedChart() {
   const [isRefreshing, setIsRefreshing] = useState(false) 
   const [totalFaucets, setTotalFaucets] = useState(0)
 
-  const fetchAndStoreFaucetData = useCallback(async (isManualRefresh = false) => {
+  // Replace your existing fetchAndStoreFaucetData function with this one
+
+const fetchAndStoreFaucetData = useCallback(async (isManualRefresh = false) => {
     if (!isManualRefresh) {
       setLoading(true);
     } else {
@@ -76,6 +113,9 @@ export function FaucetsCreatedChart() {
     }
     
     try {
+      // 🌟 STEP 1: Fetch the set of addresses marked as deleted in the backend
+      const deletedAddressesSet = await fetchDeletedFaucetsSet();
+
       const chartData: ChartData[] = []
       await Promise.all(
         networks.map(async (network) => {
@@ -87,13 +127,22 @@ export function FaucetsCreatedChart() {
           const provider = new JsonRpcProvider(network.rpcUrl);
 
           try {
+            // Fetch all faucets for the network (this should return *all* addresses from the factories)
             const faucets = await getFaucetsForNetwork(network, provider)
-            const sortedFaucets = faucets.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0))
+            
+            // 🌟 STEP 2: Filter out faucets that are marked as deleted in the backend DB
+            const activeFaucets = faucets.filter(faucet => {
+                return !deletedAddressesSet.has(faucet.faucetAddress.toLowerCase());
+            });
+
+            // Count the active, non-deleted faucets
+            const activeCount = activeFaucets.length;
             
             chartData.push({
               network: network.name,
-              faucets: sortedFaucets.length,
+              faucets: activeCount,
             })
+            
           } catch (error) {
             chartData.push({
               network: network.name,
@@ -110,6 +159,7 @@ export function FaucetsCreatedChart() {
       saveToLocalStorage(FAUCET_STORAGE_KEYS.TOTAL_FAUCETS, total)
       saveToLocalStorage(FAUCET_STORAGE_KEYS.LAST_UPDATED, Date.now())
 
+      // NOTE: Ensure DataService.saveFaucetData schema matches (network: string, faucets: number)
       const supabaseData: Omit<FaucetData, 'id' | 'updated_at'>[] = validChartData.map(item => ({
         network: item.network,
         faucets: item.faucets
@@ -125,7 +175,7 @@ export function FaucetsCreatedChart() {
       setLoading(false)
       setIsRefreshing(false)
     }
-  }, [networks]) 
+  }, [networks])
 
   const loadStoredData = async () => {
     if (isCacheValid()) {

@@ -24,7 +24,7 @@ export default function Loading() {
         {/* Replace with your actual logo */}
         <div className="flex flex-col items-center">
           <Image
-            src="/white_FaucetDrops.png"
+            src="/logo.png"
             alt="Logo"
             width={120}
             height={120}

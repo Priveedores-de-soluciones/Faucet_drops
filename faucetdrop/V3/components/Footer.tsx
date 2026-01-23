@@ -1,7 +1,7 @@
 "use client";
 
 import Link from 'next/link';
-import { siX, siGithub, siTelegram, siGmail } from 'simple-icons/icons'
+import { siX, siGithub, siTelegram, siGmail, siYoutube } from 'simple-icons/icons'
 import Image from 'next/image';
 
 interface IconProps {
@@ -41,37 +41,38 @@ const Footer = () => {
     {
       title: 'Product',
       links: [
-        { name: 'Features', href: '/features' },
-        { name: 'Pricing', href: '/pricing' },
-        { name: 'Templates', href: '/templates' },
-        { name: 'Integrations', href: '/integrations' },
+        { name: 'Faucets', href: '/coming-soon' },
+        { name: 'Quests', href: '/coming-soon' },
+        { name: 'Quizzes', href: '/coming-soon' },
+        { name: 'Enterprise', href: '/coming-soon' },
       ],
     },
     {
       title: 'Company',
       links: [
-        { name: 'About Us', href: '/about' },
-        { name: 'Careers', href: '/careers' },
-        { name: 'Blog', href: '/blog' },
-        { name: 'Press', href: '/press' },
+        { name: 'About Us', href: '/coming-soon' },
+        { name: 'Careers', href: '/coming-soon' },
+        { name: 'Blog', href: '/coming-soon' },
+        { name: 'Press', href: '/coming-soon' },
       ],
     },
     {
       title: 'Resources',
       links: [
-        { name: 'Documentation', href: '/docs' },
-        { name: 'Guides', href: '/guides' },
-        { name: 'API Status', href: '/status' },
-        { name: 'Help Center', href: '/help' },
+        { name: 'Documentation', href: '/coming-soon' },
+        { name: 'Guides', href: '/coming-soon' },
+        { name: 'API Status', href: '/coming-soon' },
+        { name: 'Help Center', href: '/coming-soon' },
       ],
     },
   ];
 
   const socialLinks = [
-    { icon: <SimpleIcon icon={siX} size={20} />, href: 'https://twitter.com', label: 'Twitter' },
-    { icon: <SimpleIcon icon={siGithub} size={20} />, href: 'https://github.com', label: 'GitHub' },
-    { icon: <SimpleIcon icon={siTelegram} size={20} />, href: 'https://linkedin.com', label: 'LinkedIn' },
-    { icon: <SimpleIcon icon={siGmail} size={20} />, href: 'mailto:contact@example.com', label: 'Email' },
+    { icon: <SimpleIcon icon={siX} size={20} />, href: 'https://x.com/faucetdrops', label: 'Twitter' },
+    { icon: <SimpleIcon icon={siGithub} size={20} />, href: 'https://github.com/Priveedores-de-soluciones/Faucet_drops', label: 'GitHub' },
+    { icon: <SimpleIcon icon={siTelegram} size={20} />, href: 'https://t.me/faucetdropschat', label: 'Telegram' },
+    { icon: <SimpleIcon icon={siGmail} size={20} />, href: 'mailto:drops.faucet@gmail.com', label: 'Email' },
+    { icon: <SimpleIcon icon={siYoutube} size={20} />, href: 'https://www.youtube.com/@Faucet_Drops', label: 'Youtube' },
   ];
 
   return (
@@ -82,7 +83,7 @@ const Footer = () => {
           <div className="lg:col-span-4">
             <div className="flex items-center space-x-2 mb-4">
               <Image 
-                src='/white_FaucetDrops.png'
+                src='/logo.png'
                 alt='Logo'
                 className='w-fit h-16'
                 width={1000}
@@ -90,7 +91,7 @@ const Footer = () => {
               />
             </div>
             <p className={`mb-6 text-[#94A3B8]`}>
-              The all-in-one platform for building modern web applications with ease.
+            Free, Fast, Fair & Frictionless Token Distribution 💧
             </p>
 
             {/* Social links */}
@@ -146,7 +147,7 @@ const Footer = () => {
             <Link href="/terms" className="text-sm hover:text-[#2563EB] transition-colors">
               Terms of Service
             </Link>
-            <Link href="/cookies" className="text-sm hover:text-[#2563EB] transition-colors">
+            <Link href="/cookie-policy" className="text-sm hover:text-[#2563EB] transition-colors">
               Cookie Policy
             </Link>
           </div>

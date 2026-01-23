@@ -1,9 +1,12 @@
 'use client'
 import { Rocket } from 'lucide-react';
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
+// import AnimatedHeroText from '@/components/AnimatedHeroText';
+import MagneticButton from '@/components/MagneticButton';
+// import { useRouter } from 'next/navigation';
+import ScrollReveal from '@/components/ScrollReveal';
 
 const Drops: React.FC = () => {
   return (
@@ -65,14 +68,20 @@ const AnimatedGradient = () => {
 };
 
 const HeroSection: React.FC = () => {
-  const router = useRouter();
+  // const router = useRouter();
 
   const handleLaunchApp = () => {
-    router.push('/coming-soon');
+    if (navigator.userAgent.includes("MetaMask") || navigator.userAgent.includes("Trust")) {
+      window.location.href = "https://app.faucetdrops.io/";
+    } else {
+      window.open("https://app.faucetdrops.io/", "_blank", "noopener,noreferrer");
+    }
+    
+    // window.open('https://app.faucetdrops.io/', '_blank', 'noopener,noreferrer');
   };
 
   return (
-    <div className="min-h-screen relative overflow-hidden flex items-center justify-center">
+    <div className="min-h-screen relative overflow-hidden flex items-center justify-center py-10 w-full">
       {/* Animated Background Elements */}
       <svg className="absolute inset-0 overflow-hidden">
         <motion.div
@@ -110,34 +119,51 @@ const HeroSection: React.FC = () => {
       </svg>
 
       {/* New Pattern */}
-      <div className="min-h-screen text-white flex items-center justify-center p-8">
-        <motion.div 
+      <div className="min-h-screen text-white flex flex-col-reverse md:flex-row items-center justify-center p-8 w-full">
+        <motion.div
           className="max-w-7xl w-full  gap-12 items-center"
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5, duration: 0.8 }}
         >
-          <motion.div 
+          <motion.div
             className=""
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.5, duration: 0.8 }}
           >
-            <h1 className="text-5xl md:text-6xl font-bold leading-tight">
-              Unify Your Onchain Growth, <br />
-              <span className='text-2xl md:text-3xl'>
-                Automate Your Rewards, Scale Engagement
-              </span>
-            </h1>
+            <ScrollReveal
+              direction="up"
+              delay={500}
+            >
+              <h2 className="text-2xl md:text-3xl lg:text-4xl mx:text-5xl font-bold leading-tight">
+                Unify Your Onchain Growth, Automate Your Rewards, Scale Engagement
+              </h2>
+            </ScrollReveal>
 
-            <p className="text-gray-400 text-lg leading-relaxed max-w-lg">
-              FaucetDrops helps web3 Projects, DAOs, Protocols, and Communities automate token distribution, run interactive campaigns and onboard real users at scale - all in one powerful platfoarm.
-            </p>
+            <motion.p
+              className="text-gray-400 text-base lg:text-lg leading-relaxed max-w-2xl mt-6"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 2, duration: 1 }}
+            >
+              FaucetDrops helps web3 Projects, DAOs, Protocols, and Communities automate token distribution, run interactive campaigns and onboard real users at scale - all in one powerful platform.
+            </motion.p>
 
-            <button onClick={handleLaunchApp} className="group flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-white font-semibold px-6 py-3 rounded-full transition-all duration-200 mt-8">
-              Launch App
-              <Rocket className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
-            </button>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 2.5, duration: 0.8 }}
+              className="mt-8"
+            >
+              <MagneticButton
+                onClick={handleLaunchApp}
+                className="group flex items-center gap-2 bg-linear-to-r from-[#0052FF] to-[#2563EB] hover:from-[#2563EB] hover:to-[#0052FF] text-black font-semibold px-8 py-4 rounded-full transition-all duration-200 shadow-lg shadow-[#94A3B8]/20 hover:shadow-xl hover:shadow-[#94A3B8]/30"
+              >
+                Launch App
+                <Rocket className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+              </MagneticButton>
+            </motion.div>
           </motion.div>
         </motion.div>
 

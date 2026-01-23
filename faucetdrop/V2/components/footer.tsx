@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import Image from "next/image"
 import Link from "next/link"
 
-// Custom icons for X (Twitter) and Telegram since lucide-react doesn't have them
+// Custom icons for X (Twitter) and Telegram
 const XIcon = ({ className }: { className?: string }) => (
   <svg
     viewBox="0 0 24 24"
@@ -37,31 +37,31 @@ export const Footer: React.FC<FooterProps> = ({ className = "" }) => {
   const socialLinks = [
     {
       name: "X (Twitter)",
-      href: "https://x.com/faucetdrops", // Replace with your actual handle
+      href: "https://x.com/faucetdrops",
       icon: XIcon,
       hoverColor: "hover:text-sky-500"
     },
     {
       name: "YouTube",
-      href: "https://www.youtube.com/@Faucet_Drops", // Replace with your actual channel
+      href: "https://www.youtube.com/@Faucet_Drops",
       icon: Youtube,
       hoverColor: "hover:text-red-500"
     },
     {
       name: "Telegram",
-      href: "https://t.me/faucetdropschat", // Replace with your actual channel
+      href: "https://t.me/faucetdropschat",
       icon: TelegramIcon,
       hoverColor: "hover:text-blue-500"
     },
     {
       name: "GitHub",
-      href: "https://github.com/Priveedores-de-soluciones/Faucet_drops", // Replace with your actual repo
+      href: "https://github.com/Priveedores-de-soluciones/Faucet_drops",
       icon: Github,
       hoverColor: "hover:text-gray-600 dark:hover:text-gray-300"
     },
     {
       name: "Email",
-      href: "mailto:drops.faucet@gmail.com", // Replace with your actual email
+      href: "mailto:drops.faucet@gmail.com",
       icon: Mail,
       hoverColor: "hover:text-green-500"
     }
@@ -69,78 +69,84 @@ export const Footer: React.FC<FooterProps> = ({ className = "" }) => {
 
   return (
     <footer className={`bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 mt-8 ${className}`}>
-      <div className="container mx-auto px-3 sm:px-4 lg:px-6 py-3 sm:py-4">
-        <div className="flex flex-row items-center justify-between gap-3 sm:gap-4">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4">
-            {/* Logo and Brand */}
-            <div className="flex lg:flex-row max-lg:flex-col items-center gap-2">
-              <div className="flex items-center gap-2">
-                <div className="flex-shrink-0">
-                  <Image
-                    src="/logo.png"
-                    alt="FaucetDrops Logo"
-                    width={32}
-                    height={32}
-                    className="w-7 h-7 sm:w-8 sm:h-8 lg:w-10 lg:h-10 rounded-md object-contain"
-                  />
-
-                </div>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                  FaucetDrops
-                </h3>
+      <div className="container mx-auto px-4 py-6">
+        {/* Main Flex Container: Column on mobile, Row on Desktop */}
+        <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+          
+          {/* Section 1: Brand & Tagline */}
+          <div className="flex flex-col md:flex-row items-center gap-3 md:gap-4 text-center md:text-left">
+            <div className="flex items-center gap-2">
+              <div className="flex-shrink-0">
+                <Image
+                  src="/favicon.png"
+                  alt="FaucetDrops Logo"
+                  width={40}
+                  height={40}
+                  className="w-8 h-8 lg:w-10 lg:h-10 rounded-md object-contain"
+                />
               </div>
-              <span className="hidden sm:inline text-xs text-slate-500 dark:text-slate-400 ml-1">
-                Free, Fast, Fair & Frictionless Token Distribution 💧
+              <span className="font-semibold text-slate-700 dark:text-slate-200 md:hidden">
+                FaucetDrops
               </span>
             </div>
-            {/* Copyright and Links */}
-            <div className="flex flex-row items-center gap-1 sm:gap-3 text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">
-              <div className="whitespace-nowrap">
-                &copy; {new Date().getFullYear()} FaucetDrops
-                {/* <span className="flex items-center gap-2 sm:gap-3"> */}
-                  <Link
-                    href="/privacy"
-                    className="hover:text-slate-700 dark:hover:text-slate-300 transition-colors whitespace-nowrap"
+            
+            {/* Divider for desktop only */}
+            <div className="hidden md:block w-px h-6 bg-slate-300 dark:bg-slate-600"></div>
+            
+            <span className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+              Automated onchain reward and engagement platform
+            </span>
+          </div>
+
+          {/* Section 2: Socials & Copyright (Stacked on mobile, side-by-side on desktop) */}
+          <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6">
+            
+            {/* Social Icons */}
+            <div className="flex items-center gap-2">
+              {socialLinks.map((link) => {
+                const IconComponent = link.icon
+                return (
+                  <Button
+                    key={link.name}
+                    variant="ghost"
+                    size="icon"
+                    asChild
+                    className={`h-8 w-8 text-slate-500 dark:text-slate-400 transition-colors ${link.hoverColor}`}
                   >
-                    Privacy
-                  </Link>
-                  <Link
-                    href="/terms"
-                    className="hover:text-slate-700 dark:hover:text-slate-300 transition-colors whitespace-nowrap"
-                  >
-                    Terms
-                  </Link>
-                {/* </span> */}
+                    <Link
+                      href={link.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={link.name}
+                      title={link.name}
+                    >
+                      <IconComponent className="h-4 w-4" />
+                    </Link>
+                  </Button>
+                )
+              })}
+            </div>
+
+            {/* Copyright & Links */}
+            <div className="flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400">
+              <span>&copy; {new Date().getFullYear()}</span>
+              <div className="flex items-center gap-3">
+                <Link
+                  href="/privacy"
+                  className="hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+                >
+                  Privacy
+                </Link>
+                <Link
+                  href="/terms"
+                  className="hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+                >
+                  Terms
+                </Link>
               </div>
             </div>
-          </div>
-          {/* Social Links */}
-          <div className="flex items-center gap-1 sm:gap-2">
-            {socialLinks.map((link) => {
-              const IconComponent = link.icon
-              return (
-                <Button
-                  key={link.name}
-                  variant="ghost"
-                  size="sm"
-                  asChild
-                  className={`h-7 w-7 p-0 text-slate-500 dark:text-slate-400 transition-colors ${link.hoverColor}`}
-                >
-                  <Link
-                    href={link.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={link.name}
-                    title={link.name}
-                  >
-                    <IconComponent className="h-3.5 w-3.5" />
-                  </Link>
-                </Button>
-              )
-            })}
-          </div>
 
-
+          </div>
         </div>
       </div>
     </footer>

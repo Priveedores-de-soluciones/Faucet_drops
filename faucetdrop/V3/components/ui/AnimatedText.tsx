@@ -14,7 +14,7 @@ export function AnimatedText({
   text,
   className = '',
   delay = 0.1,
-  duration = 0.5,
+  // duration = 0.5,
 }: AnimatedTextProps) {
   const letters = typeof text === 'string' ? text.split('') : [text];
 
@@ -26,26 +26,26 @@ export function AnimatedText({
     }),
   };
 
-  const child = {
-    visible: {
-      opacity: 1,
-      y: 0,
-      transition: {
-        type: 'spring',
-        damping: 12,
-        stiffness: 100,
-      },
-    },
-    hidden: {
-      opacity: 0,
-      y: 20,
-      transition: {
-        type: 'spring',
-        damping: 12,
-        stiffness: 100,
-      },
-    },
-  };
+  // const child = {
+  //   visible: {
+  //     opacity: 1,
+  //     y: 0,
+  //     transition: {
+  //       type: 'spring',
+  //       damping: 12,
+  //       stiffness: 100,
+  //     },
+  //   },
+  //   hidden: {
+  //     opacity: 0,
+  //     y: 20,
+  //     transition: {
+  //       type: 'spring',
+  //       damping: 12,
+  //       stiffness: 100,
+  //     },
+  //   },
+  // };
 
   return (
     <motion.div

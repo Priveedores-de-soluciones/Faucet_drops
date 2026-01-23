@@ -1,180 +1,106 @@
-// Fixed Divvi Integration - handles different export patterns
+// Fixed Divvi Integration
 
 // Try different import patterns
 let getReferralTag: any = null;
 let submitReferral: any = null;
 let importError: string | null = null;
 
+// Track if the last tag generation was successful
+// This prevents reporting transactions that weren't actually tagged
+let lastTagGenerationWasSuccessful = false;
+
 try {
-  // Method 1: Named imports (most common)
+  // Method 1: Named imports
   const namedImports = require("@divvi/referral-sdk");
-  console.log("Divvi SDK named imports:", namedImports);
-  console.log("Available keys:", Object.keys(namedImports));
   
-  if (namedImports.getReferralTag && typeof namedImports.getReferralTag === 'function') {
-    getReferralTag = namedImports.getReferralTag;
-    console.log("✅ getReferralTag loaded from named imports");
-  }
+  if (namedImports.getReferralTag) getReferralTag = namedImports.getReferralTag;
+  if (namedImports.submitReferral) submitReferral = namedImports.submitReferral;
   
-  if (namedImports.submitReferral && typeof namedImports.submitReferral === 'function') {
-    submitReferral = namedImports.submitReferral;
-    console.log("✅ submitReferral loaded from named imports");
-  }
-  
-  // Method 2: Check default export if named imports didn't work
+  // Method 2: Default export fallback
   if ((!getReferralTag || !submitReferral) && namedImports.default) {
-    console.log("Checking default export:", namedImports.default);
-    console.log("Default export keys:", Object.keys(namedImports.default));
-    
-    if (!getReferralTag && namedImports.default.getReferralTag) {
-      getReferralTag = namedImports.default.getReferralTag;
-      console.log("✅ getReferralTag loaded from default export");
-    }
-    
-    if (!submitReferral && namedImports.default.submitReferral) {
-      submitReferral = namedImports.default.submitReferral;
-      console.log("✅ submitReferral loaded from default export");
-    }
+    if (!getReferralTag && namedImports.default.getReferralTag) getReferralTag = namedImports.default.getReferralTag;
+    if (!submitReferral && namedImports.default.submitReferral) submitReferral = namedImports.default.submitReferral;
   }
   
-  // Method 3: Check if the entire default export is the function
+  // Method 3: Default is function
   if (!getReferralTag && typeof namedImports.default === 'function') {
-    // Sometimes the default export is the main function
     getReferralTag = namedImports.default;
-    console.log("✅ Using default export as getReferralTag");
   }
   
-} catch (error) {
+} catch (error: any) {
   console.error("Failed to import Divvi SDK:", error);
-  importError = error.message;
+  importError = error.message || "Unknown import error";
 }
 
-// Final validation
-if (!getReferralTag) {
-  console.error("❌ getReferralTag not available");
-  importError = importError || "getReferralTag function not found";
-}
-
-if (!submitReferral) {
-  console.error("❌ submitReferral not available");
-  importError = importError || "submitReferral function not found";
-}
-
-if (getReferralTag && submitReferral) {
-  console.log("✅ Divvi SDK successfully loaded");
-}
-
-// Your Divvi Identifier from the integration guide
 const DIVVI_CONSUMER_ADDRESS: `0x${string}` = "0xd59B83De618561c8FF4E98fC29a1b96ABcBFB18a";
 
-/**
- * Appends Divvi referral data to transaction data
- * @param originalData - The original transaction data
- * @param userAddress - The address of the user making the transaction
- * @returns The transaction data with Divvi referral tag
- */
 export function appendDivviReferralData(originalData: string, userAddress?: `0x${string}`): string {
-  console.log("appendDivviReferralData called with:", { 
-    originalDataLength: originalData.length, 
-    userAddress,
-    hasGetReferralTag: !!getReferralTag,
-    importError
-  });
+  // Reset flag at the start of every attempt
+  lastTagGenerationWasSuccessful = false;
 
-  // If there's an import error, return original data
-  if (importError) {
-    console.warn("Divvi SDK not available, returning original data:", importError);
+  // 1. Basic Validation
+  if (importError || !getReferralTag || typeof getReferralTag !== 'function') {
+    console.warn("Divvi SDK unavailable, skipping tag generation.");
     return originalData;
   }
 
-  // If no user address provided, return original data
   if (!userAddress) {
-    console.warn("No user address provided for Divvi referral tag, returning original data");
-    return originalData;
-  }
-
-  // If getReferralTag is not available, return original data
-  if (!getReferralTag || typeof getReferralTag !== 'function') {
-    console.warn("getReferralTag not available, returning original data");
+    console.warn("No user address provided for Divvi tag.");
     return originalData;
   }
 
   try {
-    console.log("Generating Divvi referral tag for user:", userAddress);
-    
+    // 2. Generate Tag
     const referralTag = getReferralTag({
       user: userAddress,
       consumer: DIVVI_CONSUMER_ADDRESS,
     });
 
-    console.log("Generated Divvi referral tag:", { 
-      tagLength: referralTag?.length, 
-      tagPreview: referralTag?.substring(0, 20) + "..." 
-    });
+    if (!referralTag) {
+      console.warn("Divvi SDK returned empty tag.");
+      return originalData;
+    }
 
+    // 3. Success! Set flag and return tagged data
+    lastTagGenerationWasSuccessful = true;
+    console.log("✅ Divvi tag appended successfully.");
     return originalData + referralTag;
+
   } catch (error) {
     console.error("Failed to generate Divvi referral tag:", error);
-    return originalData; // Return original data if Divvi fails
+    return originalData; 
   }
 }
 
-/**
- * Reports a successful transaction to Divvi
- * @param txHash - The transaction hash
- * @param chainId - The chain ID where the transaction was executed
- */
 export async function reportTransactionToDivvi(txHash: `0x${string}`, chainId: number): Promise<void> {
-  // If there's an import error, skip reporting
-  if (importError) {
-    console.warn("Skipping Divvi transaction reporting due to import error:", importError);
-    return;
+  // 1. Check Import Status
+  if (importError || !submitReferral) {
+    return; // Silently skip if SDK isn't loaded
   }
 
-  // If submitReferral is not available, skip reporting
-  if (!submitReferral || typeof submitReferral !== 'function') {
-    console.warn("submitReferral not available, skipping transaction reporting");
+  // 2. SAFETY CHECK: Only report if we actually tagged the transaction
+  // This prevents the 400 Bad Request error
+  if (!lastTagGenerationWasSuccessful) {
+    console.warn("Skipping Divvi report: Transaction was not successfully tagged.");
     return;
   }
 
   try {
-    console.log(`Reporting transaction ${txHash} on chain ${chainId} to Divvi`);
+    console.log(`Reporting transaction ${txHash} to Divvi...`);
     
     await submitReferral({
       txHash,
       chainId,
     });
     
-    console.log("Successfully reported transaction to Divvi");
+    console.log("✅ Transaction successfully reported to Divvi");
   } catch (error) {
-    console.error("Failed to report transaction to Divvi:", error);
-    // Don't throw the error to avoid breaking the main flow
+    // Log but do not throw, to prevent blocking UI flow
+    console.warn("Divvi reporting failed (non-critical):", error);
   }
 }
 
-/**
- * Checks if the current network is supported by Divvi
- * @param chainId - The chain ID to check
- * @returns True if the network is supported, false otherwise
- */
 export function isSupportedNetwork(chainId: number): boolean {
-  return [1, 42220, 44787, 62320, 1135, 4202, 8453, 84532, 137].includes(chainId);
+  // Added 42161 (Arbitrum) to supported list
+  return [1, 42220, 44787, 62320, 1135, 4202, 8453, 84532, 137, 42161, 421614].includes(chainId);
 }
-
-/**
- * Debug function to check Divvi SDK status
- */
-export function getDivviStatus() {
-  return {
-    isSDKLoaded: !importError,
-    importError,
-    hasGetReferralTag: !!getReferralTag,
-    hasSubmitReferral: !!submitReferral,
-    getReferralTagType: typeof getReferralTag,
-    submitReferralType: typeof submitReferral,
-    consumerAddress: DIVVI_CONSUMER_ADDRESS,
-  };
-}
-
-// Export the raw functions for debugging
-export { getReferralTag as _getReferralTag, submitReferral as _submitReferral };

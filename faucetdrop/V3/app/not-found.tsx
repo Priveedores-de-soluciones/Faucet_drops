@@ -5,11 +5,12 @@ export default function NotFound() {
   return (
     <div className="min-h-screen flex flex-col items-center justify-center text-foreground p-4">
       <div className="max-w-md w-full text-center space-y-6">
-        <div className="relative w-40 h-40 mx-auto">
+        <div className="relative w-80 h-25 mx-auto">
           <Image
-            src="/white_FaucetDrops.png"
+            src="/logo.png"
             alt="FaucetDrops Logo"
-            fill
+            width={500}
+            height={500}
             className="object-contain"
           />
         </div>

@@ -1,9 +1,10 @@
-// File: components/network-selector.tsx (NetworkSelector with Direct Switching)
+// File: components/network-selector.tsx
 "use client"
 
 import { useNetwork, type Network } from "@/hooks/use-network"
 import { useAppKit, useAppKitAccount, useAppKitNetwork } from '@reown/appkit/react'
-import { useSwitchChain, useAccount } from 'wagmi'
+import { useSwitchChain } from 'wagmi'
+import { useRouter, usePathname } from "next/navigation"
 
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -106,6 +107,9 @@ export function NetworkSelector({
   const { switchChain, isPending: isSwitching } = useSwitchChain()
   const { toast } = useToast()
   
+  const router = useRouter()
+  const pathname = usePathname()
+  
   const isWalletAvailable = typeof window !== "undefined" && window.ethereum
   const hasWalletConnected = isConnected && !!address
   
@@ -204,6 +208,15 @@ export function NetworkSelector({
         title: "Network Switched",
         description: `Switched to ${net.name}`,
       })
+      
+      // Routing Logic
+      const isLandingPage = pathname === '/'
+      const isCreatePage = pathname?.startsWith('/create')
+      
+      if (!isLandingPage && !isCreatePage) {
+        router.push(`/network/${net.chainId}`)
+      }
+
     } catch (error: any) {
       console.error('Network switch error:', error)
       toast({
@@ -366,6 +379,9 @@ export function MobileNetworkSelector({ className }: { className?: string }) {
   const { switchChain, isPending: isSwitching } = useSwitchChain()
   const { toast } = useToast()
   
+  const router = useRouter()
+  const pathname = usePathname()
+
   const hasWalletConnected = isConnected && !!address
   
   const handleNetworkSelect = async (net: Network) => {
@@ -384,6 +400,14 @@ export function MobileNetworkSelector({ className }: { className?: string }) {
         title: "Network Switched",
         description: `Switched to ${net.name}`,
       })
+
+      // Routing Logic
+      const isLandingPage = pathname === '/'
+      const isCreatePage = pathname?.startsWith('/create')
+      
+      if (!isLandingPage && !isCreatePage) {
+        router.push(`/${net.chainId}`)
+      }
     } catch (error: any) {
       console.error('Network switch error:', error)
       toast({
@@ -540,6 +564,9 @@ export function HorizontalNetworkSelector({ className }: { className?: string })
   const { switchChain, isPending: isSwitching } = useSwitchChain()
   const { toast } = useToast()
   
+  const router = useRouter()
+  const pathname = usePathname()
+
   const hasWalletConnected = isConnected && !!address
   
   const handleNetworkSelect = async (net: Network) => {
@@ -556,6 +583,14 @@ export function HorizontalNetworkSelector({ className }: { className?: string })
         title: "Network Switched",
         description: `Switched to ${net.name}`,
       })
+      
+      // Routing Logic
+      const isLandingPage = pathname === '/'
+      const isCreatePage = pathname?.startsWith('/create')
+      
+      if (!isLandingPage && !isCreatePage) {
+        router.push(`/${net.chainId}`)
+      }
     } catch (error: any) {
       console.error('Network switch error:', error)
       toast({

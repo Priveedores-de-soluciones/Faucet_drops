@@ -356,7 +356,45 @@ async function reportToDivvi(txHash: string, chainId: number): Promise<void> {
     }
   }
 }
+// Add to lib/backend-service.ts
 
+export async function getSecretCodeForAdmin(
+  userAddress: string,
+  faucetAddress: string,
+  chainId: number
+): Promise<{ secretCode: string; isValid: boolean; isFuture: boolean }> {
+  try {
+    const response = await fetch("https://fauctdrop-backend.onrender.com/get-secret-code-for-admin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userAddress,
+        faucetAddress,
+        chainId
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || "Failed to retrieve admin code");
+    }
+
+    const result = await response.json();
+    
+    if (!result.success) {
+      throw new Error("Server indicated failure");
+    }
+
+    return {
+      secretCode: result.secretCode,
+      isValid: result.isValid,
+      isFuture: result.isFuture
+    };
+  } catch (error) {
+    console.error("Error fetching admin secret code:", error);
+    throw error;
+  }
+}
 // Secret Code Retrieval Functions
 export async function retrieveSecretCode(faucetAddress: string): Promise<string> {
   try {

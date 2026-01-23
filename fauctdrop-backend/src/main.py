@@ -1,8 +1,13 @@
-from fastapi import FastAPI, HTTPException, Request, APIRouter
+from __future__ import annotations
+import shortuuid
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import UploadFile, File, Depends
 from pydantic import BaseModel, Field, ConfigDict
 from web3 import Web3
+from typing import Optional
+from typing import Union
+from datetime import datetime, timedelta, timezone
 # FIX: Use Web3's constants for ADDRESS_ZERO
 from web3.constants import ADDRESS_ZERO as ZeroAddress
 from typing import Dict, Tuple, List, Optional, Any
@@ -20,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, distinct, text # Needed for DB interaction
 from sqlalchemy import Column, TEXT, BOOLEAN, DATE, TIMESTAMP, text # Import required DB elements
 from sqlalchemy.ext.declarative import declarative_base # Import the base for ORM models
+from eth_account.messages import encode_defunct
 # ... other imports ...
 import traceback # Added for better error logging
 import logging
@@ -35,22 +41,7 @@ except ImportError:
     def get_rpc_url(chain_id):
         return os.getenv(f"RPC_URL_{chain_id}") or "http://127.0.0.1:8545" # Dummy RPC
     print("WARNING: Using dummy config due to missing 'config.py'")
-# --- REQUIRED LOCAL IMPORTS (Assume these files exist) ---
-# NOTE: The ImportError you fixed previously was likely because you needed to change
-# these to absolute imports: `from database import get_db` and `from models import Quest`.
-# Since the full file isn't available, I will mock the required models and assume
-# you will handle the necessary `database.py` and `models.py` imports.
-# MOCK/PLACEHOLDER FOR LOCAL IMPORTS (REPLACE WITH REAL IMPORTS IF USING ORM)
-# If you are using FastAPI modularity, uncomment and fix these:
-# try:
-# from database import get_db
-# from models import Quest, QuestSubmission
-# except ImportError as e:
-# print(f"CRITICAL WARNING: Database dependencies failed to import: {e}. Quest endpoints will fail.")
-   
-# --- MOCK DB FUNCTIONS AND MODELS ---
-# Since the full DB structure isn't here, we'll redefine the missing components for the sake of completion.
-# Dummy get_db function
+
 async def get_db():
     print("MOCK DB: Yielding dummy session.")
     # In a real app, this would yield an AsyncSession
@@ -86,9 +77,19 @@ if not PRIVATE_KEY or PRIVATE_KEY == "0x" + "0"*64:
 if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_KEY"):
     print("FATAL: SUPABASE_URL or SUPABASE_KEY not set.")
    
-# Initialize Supabase client (will fail if keys are missing/invalid)
+# Initialize Supabase client
 try:
-    supabase: Client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+    # CRITICAL CHANGE: Use SUPABASE_SERVICE_ROLE_KEY instead of SUPABASE_KEY
+    service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    supabase_url = os.getenv("SUPABASE_URL")
+    
+    if not service_role_key:
+        print("WARNING: SUPABASE_SERVICE_ROLE_KEY not set. Uploads may fail due to RLS.")
+        # Fallback to standard key if service key is missing (optional)
+        service_role_key = os.getenv("SUPABASE_KEY")
+
+    supabase: Client = create_client(supabase_url, service_role_key)
+    
 except Exception as e:
     print(f"Supabase initialization failed: {e}. API endpoints relying on Supabase will fail.")
    
@@ -1753,29 +1754,75 @@ signer = Account.from_key(PRIVATE_KEY)
 # Platform owner address
 PLATFORM_OWNER = "0x9fBC2A0de6e5C5Fd96e8D11541608f5F328C0785"
 # --- NEW QUEST PYDANTIC MODELS ---
+
 class StagePassRequirements(BaseModel):
-    Beginner: int
-    Intermediate: int
-    Advance: int
-    Legend: int
-    Ultimate: int
-    
+    Beginner: int = 0
+    Intermediate: int = 0
+    Advance: int = 0
+    Legend: int = 0
+    Ultimate: int = 0
+# Request model for availability check
+class AvailabilityCheckRequest(BaseModel):
+    field: str  # e.g., "username", "email", "twitter_handle"
+    value: str
+    current_wallet: str
+
+class DeleteFaucetRequest(BaseModel):
+    faucetAddress: str
+    userAddress: str # The initiator of the deletion
+    chainId: int
+class QuestDraft(BaseModel):
+    creatorAddress: str
+    title: str
+    description: str
+    imageUrl: str
+    rewardPool: str
+    rewardTokenType: str
+    tokenAddress: str
+    distributionConfig: dict
+    faucetAddress: str  # Will be set after deployment
+
 class QuestTask(BaseModel):
     id: str
     title: str
-    description: str
-    points: int = 100
-    required: bool = True
-    category: str = "social"
-    url: str
-    action: str
+    description: Optional[str] = None
+    points: Union[int, str]
+    required: bool
+    category: str
+    url: Optional[str] = None
+    action: Optional[str] = None
     verificationType: str
     targetPlatform: Optional[str] = None
-    targetHandle: Optional[str] = None
-    targetContractAddress: Optional[str] = None
-    targetChainId: Optional[str] = None
     stage: str
-    minReferrals: Optional[int] = None
+
+class QuestDraft(BaseModel):
+    faucetAddress: str  
+    creatorAddress: str
+    title: str
+    description: Optional[str] = ""
+    imageUrl: Optional[str] = ""
+    rewardPool: Optional[str] = "0"
+    rewardTokenType: Optional[str] = "native"
+    tokenAddress: Optional[str] = None
+    distributionConfig: Optional[Dict] = {}
+
+class QuestFinalize(BaseModel):
+    faucetAddress: str 
+    draftId: Optional[str] = None
+    
+    creatorAddress: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    imageUrl: Optional[str] = None
+    
+    startDate: str
+    endDate: str
+    claimWindowHours: int
+    tasks: List[QuestTask]
+    
+    # 2. Use the correctly defined class here
+    stagePassRequirements: StagePassRequirements 
+    enforceStageRules: bool = False
 
 class Quest(BaseModel):
     creatorAddress: str
@@ -1791,6 +1838,13 @@ class Quest(BaseModel):
     tokenAddress: str
     tasks: List[QuestTask]
     stagePassRequirements: StagePassRequirements # New field
+# --- Pydantic Model (No changes needed here) ---
+class RegisterFaucetRequest(BaseModel):
+    faucetAddress: str
+    ownerAddress: str
+    chainId: int
+    faucetType: str
+    name: str
 
 class ImageUploadResponse(BaseModel):
     success: bool
@@ -1826,6 +1880,14 @@ class QuestOverview(BaseModel):
         from_attributes=True,
         populate_by_name=True
     )
+
+class JoinQuestRequest(BaseModel):
+    walletAddress: str
+    referralCode: Optional[str] = None # Optional code from the person who invited them
+
+class CheckInRequest(BaseModel):
+    walletAddress: str
+
 # Droplist-specific models (kept for compatibility)
 class DroplistTask(BaseModel):
     title: str
@@ -1837,6 +1899,27 @@ class DroplistTask(BaseModel):
     action: Optional[str] = "follow"
     points: int = 100
     category: str = "social"
+
+class UserProfileUpdate(BaseModel):
+    wallet_address: str
+    username: str
+    email: Optional[str] = None
+    bio: Optional[str] = None
+    twitter_handle: Optional[str] = None
+    discord_handle: Optional[str] = None
+    telegram_handle: Optional[str] = None  # NEW
+    farcaster_handle: Optional[str] = None # NEW
+    avatar_url: Optional[str] = None
+    # Security fields
+    signature: str 
+    message: str 
+    nonce: str
+class LinkedWalletRequest(BaseModel):
+    main_wallet: str
+    secondary_wallet: str
+    signature: str # Signed by the secondary wallet
+    message: str
+
 class DroplistConfig(BaseModel):
     isActive: bool
     title: str
@@ -1927,7 +2010,10 @@ class SetClaimParametersRequest(BaseModel):
     tasks: Optional[List[FaucetTask]] = None
 class GetSecretCodeRequest(BaseModel):
     faucetAddress: str
-   
+
+class SubmissionUpdate(BaseModel):
+    status: str  # 'approved' or 'rejected'
+
 class AdminPopupPreferenceRequest(BaseModel):
     userAddress: str
     faucetAddress: str
@@ -1961,6 +2047,14 @@ class FaucetMetadata(BaseModel):
     imageUrl: Optional[str] = None
     createdBy: str
     chainId: int
+
+class QuestUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    rewardPool: Optional[str] = None
+    imageUrl: Optional[str] = None
+    isActive: Optional[bool] = None
+
 # CHAIN CONFIGURATION
 CHAIN_INFO = {
     # Ethereum
@@ -2027,7 +2121,55 @@ class AnalyticsDataManager:
             print(f"❌ Error storing analytics data for {key}: {str(e)}")
             return False
    
-    async def get_analytics_data(self, key: str) -> Optional[Any]:
+    # --- HELPER FUNCTIONS FOR QUEST LOGIC ---
+
+async def get_quest_context(faucet_address: str):
+    """
+    Fetches the Stage Requirements and Task List from the DB to verify points and stages.
+    """
+    try:
+        # 1. Fetch Stage Requirements from 'quests' table
+        quest_response = supabase.table("quests").select("stage_pass_requirements").eq("faucet_address", faucet_address).execute()
+        if not quest_response.data:
+            return None, None
+            
+        stage_reqs = quest_response.data[0].get("stage_pass_requirements", {})
+        # Handle case where it might be stored as a JSON string
+        if isinstance(stage_reqs, str):
+            stage_reqs = json.loads(stage_reqs)
+
+        # 2. Fetch Tasks from 'faucet_tasks' table
+        tasks_response = supabase.table("faucet_tasks").select("tasks").eq("faucet_address", faucet_address).execute()
+        tasks = tasks_response.data[0].get("tasks", []) if tasks_response.data else []
+
+        return stage_reqs, tasks
+    except Exception as e:
+        print(f"Error fetching quest context: {e}")
+        return None, None
+
+def calculate_current_stage(stage_points: Dict[str, int], requirements: Dict[str, int]) -> str:
+    """Calculates the highest unlocked stage based on points."""
+    stages = ['Beginner', 'Intermediate', 'Advance', 'Legend', 'Ultimate']
+    current_stage = 'Beginner'
+    
+    for i, stage in enumerate(stages):
+        # Default requirement to 0 if not set, strict inequality vs >= depends on your rules
+        req = requirements.get(stage, 0)
+        points = stage_points.get(stage, 0)
+        
+        if points >= req and req > 0:
+            # If we pass this stage, we are at least in the next stage (if it exists)
+            if i + 1 < len(stages):
+                current_stage = stages[i + 1]
+            else:
+                current_stage = stage # Max level
+        else:
+            # If we don't pass this stage, we stay at the current calculation
+            break
+            
+    return current_stage
+
+async def get_analytics_data(self, key: str) -> Optional[Any]:
         """Get analytics data from Supabase"""
         try:
             response = supabase.table("analytics_cache").select("*").eq("key", key).execute()
@@ -2046,7 +2188,7 @@ class AnalyticsDataManager:
         except Exception as e:
             print(f"❌ Error getting analytics data for {key}: {str(e)}")
             return None
-    async def get_token_info(self, token_address: str, provider: Web3, chain_id: int, is_ether: bool) -> Dict[str, Any]:
+async def get_token_info(self, token_address: str, provider: Web3, chain_id: int, is_ether: bool) -> Dict[str, Any]:
         """Get token information"""
         chain_config = CHAIN_CONFIGS.get(chain_id, {})
        
@@ -2067,7 +2209,7 @@ class AnalyticsDataManager:
         except Exception as e:
             print(f"Error fetching token info for {token_address}: {str(e)}")
             return {"symbol": "TOKEN", "decimals": 18}
-    async def get_all_faucets_from_network(self, network: Dict) -> List[Dict]:
+async def get_all_faucets_from_network(self, network: Dict) -> List[Dict]:
         """Fetch all faucets from a single network"""
         try:
             print(f"🔄 Fetching faucets from {network['name']}...")
@@ -2133,7 +2275,7 @@ class AnalyticsDataManager:
         except Exception as e:
             print(f"❌ Error fetching faucets from {network['name']}: {str(e)}")
             return []
-    async def get_all_transactions_from_network(self, network: Dict) -> List[Dict]:
+async def get_all_transactions_from_network(self, network: Dict) -> List[Dict]:
         """Fetch all transactions from a single network"""
         try:
             print(f"🔄 Fetching transactions from {network['name']}...")
@@ -2206,7 +2348,39 @@ class AnalyticsDataManager:
         except Exception as e:
             print(f"❌ Error fetching transactions from {network['name']}: {str(e)}")
             return []
-    def process_faucets_for_chart(self, faucets_data: List[Dict]) -> List[Dict]:
+def get_quest_data(faucet_address: str):
+        """
+        In a real app, you fetch this from a 'quests' table.
+        For now, we return the hardcoded structure you used in the frontend,
+        or you can store this JSON in Supabase.
+        """
+        # ... logic to fetch quest details ...
+        # This is a placeholder for the static quest data structure
+        return {
+            "stagePassRequirements": {
+                "Beginner": 100, "Intermediate": 300, "Advance": 600, "Legend": 1000, "Ultimate": 2000
+            },
+            "tasks": [
+                {"id": "t1", "title": "Follow Twitter", "points": 50, "stage": "Beginner", "verificationType": "manual_link"},
+                # ... other tasks
+            ]
+        }
+
+def calculate_new_stage(current_points: Dict[str, int], requirements: Dict[str, int]) -> str:
+    stages = ['Beginner', 'Intermediate', 'Advance', 'Legend', 'Ultimate']
+    current_stage = 'Beginner'
+    
+    for i, stage in enumerate(stages):
+        if current_points.get(stage, 0) >= requirements.get(stage, 0):
+            if i + 1 < len(stages):
+                current_stage = stages[i + 1]
+            else:
+                current_stage = stage
+        else:
+            break
+    return current_stage
+
+def process_faucets_for_chart(self, faucets_data: List[Dict]) -> List[Dict]:
         """Process faucets data for chart display"""
         try:
             network_counts = {}
@@ -2230,7 +2404,7 @@ class AnalyticsDataManager:
         except Exception as e:
             print(f"Error processing faucets for chart: {str(e)}")
             return []
-    def process_users_for_chart(self, claims_data: List[Dict]) -> Dict[str, Any]:
+def process_users_for_chart(self, claims_data: List[Dict]) -> Dict[str, Any]:
         """Process users data for chart display with additional projected users"""
         try:
             unique_users = set()
@@ -2339,7 +2513,7 @@ class AnalyticsDataManager:
                 "projectionPeriod": "none"
             }
            
-    def process_claims_for_chart(self, claims_data: List[Dict], faucet_names: Dict[str, str] = None) -> Dict[str, Any]:
+def process_claims_for_chart(self, claims_data: List[Dict], faucet_names: Dict[str, str] = None) -> Dict[str, Any]:
         """Process claims data for chart display"""
         try:
             if faucet_names is None:
@@ -2448,7 +2622,7 @@ class AnalyticsDataManager:
         except Exception as e:
             print(f"Error processing claims for chart: {str(e)}")
             return {"chartData": [], "faucetRankings": [], "totalClaims": 0, "totalFaucets": 0}
-    def process_transactions_for_chart(self, transactions_data: List[Dict]) -> Dict[str, Any]:
+def process_transactions_for_chart(self, transactions_data: List[Dict]) -> Dict[str, Any]:
         """Process transactions data for chart display"""
         try:
             network_stats = {}
@@ -2499,7 +2673,7 @@ class AnalyticsDataManager:
         except Exception as e:
             print(f"Error processing transactions for chart: {str(e)}")
             return {"networkStats": [], "totalTransactions": 0}
-    async def fetch_faucet_names(self, faucets_data: List[Dict]) -> Dict[str, str]:
+async def fetch_faucet_names(self, faucets_data: List[Dict]) -> Dict[str, str]:
         """Fetch faucet names for addresses"""
         try:
             faucet_names = {}
@@ -2516,7 +2690,7 @@ class AnalyticsDataManager:
         except Exception as e:
             print(f"Error fetching faucet names: {str(e)}")
             return {}
-    async def update_all_analytics_data(self) -> Dict[str, Any]:
+async def update_all_analytics_data(self) -> Dict[str, Any]:
         """Update all analytics data from blockchain sources"""
         if self.is_updating:
             return {"success": False, "message": "Update already in progress"}
@@ -2660,6 +2834,19 @@ class AnalyticsDataManager:
            
         finally:
             self.is_updating = False
+
+def verify_signature(address: str, message: str, signature: str) -> bool:
+    """Recover the signer address from the signature to verify authenticity."""
+    try:
+        # Create the precise message structure expected by EIP-191
+        encoded_message = encode_defunct(text=message)
+        recovered_address = Account.recover_message(encoded_message, signature=signature)
+        
+        return recovered_address.lower() == address.lower()
+    except Exception as e:
+        print(f"Signature verification failed: {e}")
+        return False
+
 # Image upload endpoint using Supabase Storage
 @app.post("/upload-image", response_model=ImageUploadResponse)
 async def upload_faucet_image(file: UploadFile = File(...)):
@@ -2715,6 +2902,33 @@ async def upload_faucet_image(file: UploadFile = File(...)):
     except Exception as e:
         print(f"💥 Error uploading image: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
+    
+@app.get("/deleted-faucets", tags=["Utility"])
+async def get_deleted_faucets_endpoint():
+    """
+    Returns a list of all faucet addresses marked as permanently deleted in the database.
+    (This is typically used for auditing or filtering on the frontend.)
+    """
+    try:
+        # NOTE: Implement proper authentication/authorization here if this endpoint should be restricted
+        # For security, you should check if the requester is an admin or platform owner.
+        
+        deleted_faucets = await get_all_deleted_faucets()
+        
+        # Extract just the addresses for simplicity in this endpoint
+        deleted_addresses = [record['faucet_address'] for record in deleted_faucets]
+        
+        return {
+            "success": True,
+            "count": len(deleted_addresses),
+            "deletedAddresses": deleted_addresses,
+            "message": "Successfully retrieved list of deleted faucet addresses."
+        }
+        
+    except Exception as e:
+        print(f"💥 Error in get_deleted_faucets_endpoint: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve deleted faucet list: {str(e)}")
+        
 # Optional: Endpoint to delete an image
 @app.delete("/delete-image")
 async def delete_faucet_image(image_url: str):
@@ -3260,6 +3474,83 @@ async def get_all_secret_codes() -> list:
     except Exception as e:
         print(f"Database error in get_all_secret_codes: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+# --- NEW FAUCET DELETION UTILITIES ---
+
+async def get_all_deleted_faucets() -> List[Dict]:
+    """
+    Retrieves all deleted faucet records from the 'deleted_faucets' table.
+    """
+    try:
+        print("🔍 Retrieving all deleted faucet addresses from Supabase...")
+        
+        # Select all columns, ordered by most recently deleted
+        response = supabase.table("deleted_faucets").select("*").order("deleted_at", desc=True).execute()
+        
+        deleted_records = response.data or []
+        
+        print(f"✅ Found {len(deleted_records)} deleted faucet records.")
+        return deleted_records
+        
+    except Exception as e:
+        print(f"💥 Database error in get_all_deleted_faucets: {str(e)}")
+        # Log the error and return an empty list gracefully
+        return []
+    
+async def record_deleted_faucet(faucet_address: str, deleted_by: str, chain_id: int):
+    """
+    Records a faucet address in the 'deleted_faucets' table in Supabase 
+    AFTER the on-chain transaction succeeded.
+    """
+    try:
+        if not Web3.is_address(faucet_address) or not Web3.is_address(deleted_by):
+            raise ValueError("Invalid address format for faucet or deleter.")
+        
+        checksum_faucet_address = Web3.to_checksum_address(faucet_address)
+        checksum_deleted_by = Web3.to_checksum_address(deleted_by)
+        
+        data = {
+            "faucet_address": checksum_faucet_address,
+            "deleted_by": checksum_deleted_by,
+            "chain_id": chain_id,
+            "deleted_at": datetime.now().isoformat()
+        }
+        
+        # Insert the record. Assumes the "deleted_faucets" table has been created in Supabase.
+        response = supabase.table("deleted_faucets").upsert(data, on_conflict="faucet_address").execute()
+        
+        if not response.data:
+            raise Exception("Failed to record deleted faucet in Supabase.")
+        
+        print(f"✅ Recorded deleted faucet {checksum_faucet_address} by {checksum_deleted_by}")
+        return response.data[0]
+        
+    except Exception as e:
+        print(f"💥 Database error in record_deleted_faucet: {str(e)}")
+        raise
+
+
+
+async def is_faucet_permanently_deleted(faucet_address: str) -> bool:
+    """
+    Checks if a faucet is marked as permanently deleted in the Supabase table.
+    """
+    try:
+        if not Web3.is_address(faucet_address):
+            return False
+            
+        checksum_faucet_address = Web3.to_checksum_address(faucet_address)
+        
+        response = supabase.table("deleted_faucets").select("faucet_address").eq(
+            "faucet_address", checksum_faucet_address
+        ).execute()
+        
+        return len(response.data) > 0
+        
+    except Exception as e:
+        print(f"⚠️ Error checking deletion status in DB: {str(e)}")
+        return False    
+
 async def check_secret_code_status(faucet_address: str, secret_code: str) -> Dict[str, Any]:
     """
     Check if a provided secret code matches and is valid for a faucet.
@@ -3653,28 +3944,46 @@ async def claim_tokens_custom(w3: Web3, faucet_address: str, user_address: str, 
         print(f"ERROR in claim_tokens_custom: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to claim tokens: {str(e)}")
 # Enhanced set_claim_parameters function for ALL faucet types
+# Updated set_claim_parameters function to APPEND tasks instead of overwriting
+
 async def set_claim_parameters(faucetAddress: str, start_time: int, end_time: int, tasks: Optional[List[Dict]] = None) -> str:
     try:
-        # Generate secret code for dropcode faucets (still needed for dropcode)
+        # 1. Generate secret code for dropcode faucets (still needed for dropcode)
         secret_code = await generate_secret_code()
         await store_secret_code(faucetAddress, secret_code, start_time, end_time)
-       
-        # Store tasks for ALL faucet types (not just dropcode)
+        
+        # 2. Handle Task Merging
         if tasks:
-            print(f"📝 Storing {len(tasks)} tasks for faucet {faucetAddress}")
-           
-            # Store tasks (use backend signer as creator for set-claim-parameters calls)
-            await store_faucet_tasks(faucetAddress, tasks, signer.address)
-            print(f"✅ Successfully stored {len(tasks)} tasks for faucet {faucetAddress}")
-       
+            print(f"📝 Processing tasks for faucet {faucetAddress}")
+            
+            # A. Fetch Existing Tasks first
+            existing_tasks = []
+            try:
+                existing_data = await get_faucet_tasks(faucetAddress)
+                if existing_data and "tasks" in existing_data:
+                    existing_tasks = existing_data["tasks"]
+                    print(f"found {len(existing_tasks)} existing tasks.")
+            except Exception as e:
+                print(f"No existing tasks found or DB error: {e}")
+
+            # B. Combine Existing + New Tasks
+            # Note: This simply appends. If you want to prevent duplicates, 
+            # you would need to filter by URL or ID here.
+            combined_tasks = existing_tasks + tasks
+            
+            # C. Store the Combined List (Use backend signer as creator for set-claim-parameters calls)
+            await store_faucet_tasks(faucetAddress, combined_tasks, signer.address)
+            print(f"✅ Successfully stored {len(combined_tasks)} total tasks (appended) for faucet {faucetAddress}")
+        
         print(f"🔐 Generated secret code for {faucetAddress}: {secret_code}")
         return secret_code
-       
+        
     except HTTPException as e:
         raise e
     except Exception as e:
         print(f"ERROR in set_claim_parameters: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to set parameters: {str(e)}")
+
 # Helper function to check if user is platform owner
 async def check_platform_owner_authorization(user_address: str) -> bool:
     """Check if user address is the platform owner"""
@@ -3837,6 +4146,131 @@ async def generate_new_drop_code_only(faucet_address: str) -> str:
     except Exception as e:
         print(f"ERROR in generate_new_drop_code_only: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to generate new drop code: {str(e)}")
+    
+@app.get("/api/check-name")
+async def check_quest_name_availability(name: str):
+    """
+    Checks if a Quest Name (title) already exists in the database.
+    Used by the frontend to provide real-time validation.
+    """
+    try:
+        clean_name = name.strip()
+        
+        if not clean_name or len(clean_name) < 3:
+            return {
+                "exists": False, 
+                "valid": False, 
+                "message": "Name must be at least 3 characters"
+            }
+
+        # Query Supabase 'quests' table
+        # We use .ilike() for case-insensitive matching to prevent duplicate confusion
+        response = supabase.table("quests")\
+            .select("title")\
+            .ilike("title", clean_name)\
+            .execute()
+
+        # If we get any rows back, the name exists
+        exists = len(response.data) > 0
+
+        return {
+            "exists": exists,
+            "valid": True,
+            "message": "Name is already taken" if exists else "Name is available"
+        }
+
+    except Exception as e:
+        print(f"💥 Error checking name availability: {str(e)}")
+        # Don't block the UI on error, just assume valid but log it
+        return {"exists": False, "valid": True, "error": str(e)}
+
+@app.get("/api/profile/user/{identifier}")
+async def get_profile_by_username_or_address(identifier: str):
+    # 1. Try searching by Username
+    response = supabase.table("user_profiles").select("*").ilike("username", identifier).execute()
+    
+    # 2. If not found, try searching by Wallet Address
+    if not response.data:
+        response = supabase.table("user_profiles").select("*").eq("wallet_address", identifier.lower()).execute()
+        
+    if not response.data:
+        raise HTTPException(status_code=404, detail="User not found")
+            
+    return {"success": True, "profile": response.data[0]}
+
+@app.get("/api/profile/user/{username}")
+async def get_profile_by_username(username: str):
+    """
+    Used for shareable links. Finds a profile by username string.
+    """
+    try:
+        # Search case-insensitive
+        response = supabase.table("user_profiles")\
+            .select("*")\
+            .ilike("username", username)\
+            .execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        return {
+            "success": True, 
+            "profile": response.data[0]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/profile/update")
+async def update_user_profile(request: UserProfileUpdate):
+    """
+    Updates or creates a user profile. 
+    Verifies that the request is signed by the wallet owner.
+    """
+    try:
+        # 1. Standardize the address
+        wallet_address = Web3.to_checksum_address(request.wallet_address)
+        
+        # 2. Security: Verify the signature
+        # This prevents anyone from updating someone else's profile by just knowing their address
+        if not verify_signature(wallet_address, request.message, request.signature):
+            raise HTTPException(status_code=401, detail="Invalid signature. Ownership verification failed.")
+
+        # 3. Prepare the data for Supabase
+        # We use snake_case to match standard PostgreSQL/Supabase column naming
+        profile_data = {
+            "wallet_address": wallet_address.lower(), # Store as lowercase for easier lookup
+            "username": request.username,
+            "email": request.email,
+            "bio": request.bio,
+            "twitter_handle": request.twitter_handle,
+            "discord_handle": request.discord_handle,
+            "telegram_handle": request.telegram_handle,
+            "farcaster_handle": request.farcaster_handle,
+            "avatar_url": request.avatar_url,
+            "updated_at": datetime.now().isoformat()
+        }
+
+        # 4. Upsert into Supabase 'user_profiles' table
+        response = supabase.table("user_profiles").upsert(
+            profile_data, 
+            on_conflict="wallet_address"
+        ).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=500, detail="Failed to save profile to database")
+            
+        return {
+            "success": True, 
+            "message": "Profile updated successfully", 
+            "profile": response.data[0]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"💥 Profile Update Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error during profile update")
+
 @app.post("/faucet-x-template")
 async def save_faucet_x_template(request: CustomXPostTemplate):
     """Save custom X post template for a faucet"""
@@ -3887,6 +4321,53 @@ async def save_faucet_x_template(request: CustomXPostTemplate):
     except Exception as e:
         print(f"💥 Error saving X post template: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to save template: {str(e)}")
+
+# --- NEW API ENDPOINT: DELETE FAUCET METADATA ---
+
+# In main.py
+
+@app.post("/delete-faucet-metadata") 
+async def delete_faucet_metadata_endpoint(request: DeleteFaucetRequest):
+    try:
+        # 1. Use Checksum for Web3 verification (Security)
+        faucet_address_checksum = Web3.to_checksum_address(request.faucetAddress)
+        user_address_checksum = Web3.to_checksum_address(request.userAddress)
+        
+        # 2. Verify authorization using the checksummed address
+        w3 = await get_web3_instance(request.chainId)
+        is_authorized = await check_user_is_authorized_for_faucet(w3, faucet_address_checksum, user_address_checksum)
+        
+        if not is_authorized:
+            raise HTTPException(status_code=403, detail="Access denied.")
+        
+        # 3. CONVERT TO LOWERCASE FOR DATABASE OPERATIONS
+        # This ensures we match the format stored in 'userfaucets'
+        faucet_address_lower = request.faucetAddress.lower()
+
+        # 4. Perform the Deletions using LOWERCASE address
+        # Delete from userfaucets (The one showing in dashboard)
+        supabase.table("userfaucets").delete().eq("faucet_address", faucet_address_lower).execute()
+        
+        # Clean up other metadata
+        supabase.table("faucet_metadata").delete().eq("faucet_address", faucet_address_lower).execute()
+        supabase.table("faucet_tasks").delete().eq("faucet_address", faucet_address_lower).execute()
+        supabase.table("faucet_x_templates").delete().eq("faucet_address", faucet_address_lower).execute()
+
+        # 5. Record deletion (Optional: store as checksum or lower, depending on preference)
+        await record_deleted_faucet(faucet_address_checksum, user_address_checksum, request.chainId)
+        
+        return {
+            "success": True,
+            "faucetAddress": faucet_address_checksum,
+            "message": "Faucet marked as deleted and metadata cleaned up."
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"💥 Error processing deletion: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete metadata: {str(e)}")
+    
 @app.get("/faucet-x-template/{faucetAddress}")
 async def get_faucet_x_template(faucetAddress: str):
     """Get custom X post template for a faucet"""
@@ -4067,6 +4548,58 @@ async def debug_drop_code_status(faucetAddress: str):
             "error": str(e),
             "faucetAddress": faucetAddress
         }
+
+@app.post("/api/profile/check-availability")
+async def check_availability(request: AvailabilityCheckRequest):
+    """
+    Checks if a profile field value is already taken by ANOTHER user.
+    Uses 'ilike' for case-insensitive comparison.
+    """
+    try:
+        if not request.value:
+            return {"available": True}
+
+        # Map frontend field names to database column names
+        column_map = {
+            "username": "username",
+            "email": "email",
+            "twitter_handle": "twitter_handle",
+            "discord_handle": "discord_handle",
+            "telegram_handle": "telegram_handle",
+            "farcaster_handle": "farcaster_handle"
+        }
+
+        if request.field not in column_map:
+            raise HTTPException(status_code=400, detail="Invalid field for uniqueness check")
+
+        column = column_map[request.field]
+        
+        # Ensure address is checksummed
+        try:
+            current_wallet_cs = Web3.to_checksum_address(request.current_wallet)
+        except:
+            raise HTTPException(status_code=400, detail="Invalid wallet address format")
+
+        # UPDATED QUERY: Use .ilike() instead of .eq()
+        # This checks if 'Value', 'value', or 'VALUE' exists, excluding the current user
+        response = supabase.table("user_profiles")\
+            .select("wallet_address")\
+            .ilike(column, request.value)\
+            .neq("wallet_address", current_wallet_cs)\
+            .execute()
+
+        if response.data and len(response.data) > 0:
+            return {
+                "available": False, 
+                "message": f"This {request.field.replace('_', ' ')} is already in use."
+            }
+
+        return {"available": True, "message": "Available"}
+
+    except Exception as e:
+        print(f"Availability check error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
 # API Endpoints
 @app.post("/api/droplist/config")
 async def save_droplist_config(request: DroplistConfigRequest):
@@ -4085,7 +4618,7 @@ async def save_droplist_config(request: DroplistConfigRequest):
             )
        
         # Store configuration
-        result = await store_droplist_config(request.config, request.tasks, user_address)
+        result = await store_droplist_config(request.config, request. s, user_address)
        
         return {
             "success": True,
@@ -4128,6 +4661,51 @@ async def get_droplist_config_endpoint():
     except Exception as e:
         print(f"Error getting droplist config: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get configuration: {str(e)}")
+
+@app.post("/api/upload-image", tags=["Utilities"])
+async def upload_image(file: UploadFile = File(...)):
+    """
+    Uploads an image to Supabase Storage ('quest-images' bucket) 
+    and returns the public URL.
+    """
+    try:
+        # 1. Read file content
+        file_content = await file.read()
+        file_ext = file.filename.split(".")[-1]
+        
+        # 2. Generate unique filename (using uuid)
+        import uuid
+        file_name = f"{uuid.uuid4()}.{file_ext}"
+        
+        # 3. Upload to Supabase Storage
+        # NOTE: Ensure you created a public bucket named 'quest-images'
+        bucket_name = "quest-images"
+        
+        # 'file_options' might be needed depending on supabase-py version, 
+        # usually defaults work for public buckets.
+        res = supabase.storage.from_(bucket_name).upload(
+            path=file_name,
+            file=file_content,
+            file_options={"content-type": file.content_type}
+        )
+        
+        # 4. Get Public URL
+        public_url_res = supabase.storage.from_(bucket_name).get_public_url(file_name)
+        
+        # Check if URL was generated (Supabase-py implementation varies, checking distinct return types)
+        # usually get_public_url returns a string or a dict containing publicURL
+        
+        final_url = public_url_res
+        if not isinstance(final_url, str):
+             # Some versions return specific objects, ensure we get the string
+             final_url = str(final_url)
+
+        return {"success": True, "url": final_url}
+
+    except Exception as e:
+        print(f"❌ Upload Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Image upload failed: {str(e)}")
+
 @app.get("/api/users/{wallet_address}")
 async def get_user_profile_endpoint(wallet_address: str):
     """Get user profile"""
@@ -4419,7 +4997,7 @@ async def save_quest(request: Quest):
             "end_date": quest_data.pop("endDate"),
             "reward_token_type": quest_data.pop("rewardTokenType"),
             "token_address": quest_data.pop("tokenAddress"),
-            
+            "token_symbol": quest_data.pop("tokenSymbol", None),
             # New/Updated fields:
             "image_url": quest_data.pop("imageUrl"), 
             "stage_pass_requirements": stage_reqs_to_store, # Stored as JSON/Dict
@@ -4458,79 +5036,74 @@ async def save_quest(request: Quest):
 @app.get("/api/quests/{faucetAddress}", tags=["Quest Management"])
 async def get_quest_by_address(faucetAddress: str):
     """
-    Fetch a single quest by faucet address with full details including tasks, image, and stage requirements.
+    Fetch a single quest by faucet address OR draft ID.
+    Handles strict address validation bypass for drafts.
     """
     try:
-        print(f"🔍 Fetching quest details for faucet: {faucetAddress}")
+        print(f"🔍 Fetching quest details for: {faucetAddress}")
         
-        if not Web3.is_address(faucetAddress):
-            raise HTTPException(status_code=400, detail="Invalid faucet address format")
-        
-        faucet_address = Web3.to_checksum_address(faucetAddress)
-        
+        # --- FIX STARTS HERE ---
+        # Allow Draft IDs (strings) to pass through. Only checksum if it looks like an EVM address.
+        if Web3.is_address(faucetAddress):
+            faucet_address = Web3.to_checksum_address(faucetAddress)
+        else:
+            faucet_address = faucetAddress # It's a Draft ID (e.g. "draft-uuid...")
+        # --- FIX ENDS HERE ---
+
         # 1. Fetch quest from database
         response = supabase.table("quests").select("*").eq(
             "faucet_address", faucet_address
         ).execute()
         
-        if not response.data or len(response.data) == 0:
-            raise HTTPException(status_code=404, detail=f"Quest not found for faucet address: {faucet_address}")
+        if not response.data:
+            raise HTTPException(status_code=404, detail=f"Quest not found: {faucet_address}")
         
         quest_row = response.data[0]
         
         # 2. Fetch tasks
-        tasks_response = supabase.table("faucet_tasks").select("tasks").eq(
+        tasks = []
+        tasks_res = supabase.table("faucet_tasks").select("tasks").eq(
             "faucet_address", faucet_address
         ).execute()
         
-        tasks = []
-        if tasks_response.data and len(tasks_response.data) > 0:
-            tasks = tasks_response.data[0].get("tasks", [])
+        if tasks_res.data:
+            tasks = tasks_res.data[0].get("tasks", [])
         
-        # 3. Fetch participants count
-        try:
-            participants_response = supabase.table("quest_submissions").select(
-                "user_address", count="exact"
-            ).eq("faucet_address", faucet_address).execute()
-            
-            participants_count = participants_response.count if hasattr(participants_response, 'count') else 0
-        except Exception:
-            participants_count = 0
-        
-        # 4. Parse dates
-        start_date = datetime.fromisoformat(quest_row.get("start_date").replace('Z', '+00:00')).strftime('%Y-%m-%d')
-        end_date = datetime.fromisoformat(quest_row.get("end_date").replace('Z', '+00:00')).strftime('%Y-%m-%d')
-        
-        # 5. Handle stage_pass_requirements (ensure it's parsed if stored as string JSON)
-        stage_pass_requirements = quest_row.get("stage_pass_requirements")
-        if isinstance(stage_pass_requirements, str):
+        # 3. Parse Metadata (Dates & JSON)
+        start_date = None
+        if quest_row.get("start_date"): 
+            start_date = datetime.fromisoformat(quest_row.get("start_date").replace('Z', '+00:00')).strftime('%Y-%m-%d')
+
+        end_date = None
+        if quest_row.get("end_date"): 
+            end_date = datetime.fromisoformat(quest_row.get("end_date").replace('Z', '+00:00')).strftime('%Y-%m-%d')
+
+        stage_reqs = quest_row.get("stage_pass_requirements")
+        if isinstance(stage_reqs, str):
             try:
-                stage_pass_requirements = json.loads(stage_pass_requirements)
+                stage_reqs = json.loads(stage_reqs)
             except:
-                stage_pass_requirements = {}
-        
-        # 6. Build full quest data in camelCase
+                stage_reqs = {}
+
+        # 4. Return Data
         quest_data = {
             "faucetAddress": faucet_address,
             "title": quest_row.get("title"),
             "description": quest_row.get("description"),
             "isActive": quest_row.get("is_active", False),
+            "isDraft": quest_row.get("is_draft", False),
             "rewardPool": quest_row.get("reward_pool"),
             "creatorAddress": quest_row.get("creator_address"),
             "startDate": start_date,
             "endDate": end_date,
-            "rewardTokenType": quest_row.get("reward_token_type"),
-            "tokenAddress": quest_row.get("token_address"),
-            "imageUrl": quest_row.get("image_url"), 
-            "stagePassRequirements": stage_pass_requirements,
             "tasks": tasks,
-            "tasksCount": len(tasks),
-            "participantsCount": participants_count,
-            "createdAt": quest_row.get("created_at"),
-            "updatedAt": quest_row.get("updated_at")
+            "tokenSymbol": quest_row.get("token_symbol"),
+            "imageUrl": quest_row.get("image_url"),
+            "stagePassRequirements": stage_reqs,
+            "distributionConfig": quest_row.get("distribution_config"),
+            "tokenAddress": quest_row.get("token_address"),
+            "rewardTokenType": quest_row.get("reward_token_type")
         }
-        
-        print(f"✅ Successfully fetched quest details for {faucet_address}")
         
         return {"success": True, "quest": quest_data}
         
@@ -4539,24 +5112,22 @@ async def get_quest_by_address(faucetAddress: str):
     except Exception as e:
         print(f"❌ Error fetching quest: {str(e)}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to fetch quest: {str(e)}")
-        
+        raise HTTPException(status_code=500, detail=str(e))
 # --- GET ALL QUESTS (Updated to fetch new fields) ---
 
 @app.get("/api/quests", tags=["Quest Management"])
 async def get_all_quests():
     """
-    Fetch all quests from Supabase with computed fields for tasks and participants.
-    UPDATED: Includes image_url and stage_pass_requirements in the data where possible.
+    Fetch all quests from Supabase with computed fields.
+    Handles missing dates gracefully to prevent crashes on drafts.
     """
     try:
         print("🔍 Fetching all quests from Supabase...")
         
-        # Fetch all quests from the quests table
+        # Fetch all quests
         response = supabase.table("quests").select("*").execute()
         
         if not response.data:
-            print("📭 No quests found in database")
             return {"success": True, "quests": [], "message": "No quests found"}
         
         quests_list = []
@@ -4585,40 +5156,49 @@ async def get_all_quests():
                 except Exception:
                     participants_count = 0
                     
-                # Parse dates
-                start_date = datetime.fromisoformat(quest_row.get("start_date").replace('Z', '+00:00')).strftime('%Y-%m-%d')
-                end_date = datetime.fromisoformat(quest_row.get("end_date").replace('Z', '+00:00')).strftime('%Y-%m-%d')
+                # --- FIX: SAFE DATE PARSING ---
+                start_date = None
+                raw_start = quest_row.get("start_date")
+                if raw_start:
+                    start_date = datetime.fromisoformat(raw_start.replace('Z', '+00:00')).strftime('%Y-%m-%d')
+
+                end_date = None
+                raw_end = quest_row.get("end_date")
+                if raw_end:
+                    end_date = datetime.fromisoformat(raw_end.replace('Z', '+00:00')).strftime('%Y-%m-%d')
+                # ------------------------------
                 
-                # Build quest overview in camelCase for frontend
+                # Build quest overview
                 quest_data = {
                     "faucetAddress": faucet_address,
                     "title": quest_row.get("title"),
                     "description": quest_row.get("description"),
                     "isActive": quest_row.get("is_active", False),
+                    "isDraft": quest_row.get("is_draft", False), # Useful for frontend filtering
                     "rewardPool": quest_row.get("reward_pool"),
                     "creatorAddress": quest_row.get("creator_address"),
                     "startDate": start_date,
                     "endDate": end_date,
                     "tasksCount": tasks_count,
                     "participantsCount": participants_count,
-                    "imageUrl": quest_row.get("image_url"), # Include image URL for listing
+                    "imageUrl": quest_row.get("image_url"),
                 }
                 
                 quests_list.append(quest_data)
                 
             except Exception as e:
+                # Log the specific error but don't crash the whole endpoint
                 print(f"⚠️ Error processing quest {quest_row.get('faucet_address', 'unknown')}: {str(e)}")
-                traceback.print_exc()
                 continue
         
-        print(f"✅ Successfully fetched {len(quests_list)} quests from database")
-        
+        print(f"✅ Successfully fetched {len(quests_list)} quests")
         return {"success": True, "quests": quests_list, "count": len(quests_list)}
         
     except Exception as e:
         print(f"❌ Error fetching quests: {str(e)}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to fetch quests: {str(e)}")@app.post("/admin/finalize-rewards")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch quests: {str(e)}")
+
 async def finalize_rewards(request: FinalizeRewardsRequest):
     # Mocking success for demo, actual implementation requires Web3 interaction
     if len(request.winners) != len(request.amounts):
@@ -4632,26 +5212,494 @@ async def finalize_rewards(request: FinalizeRewardsRequest):
         "txHash": "0xMOCKTXHASH",
         "faucetAddress": request.faucetAddress
     }
+
 @app.post("/add-faucet-tasks")
 async def add_faucet_tasks_endpoint(request: AddTasksRequest):
+    """Add tasks to a faucet (Appending to existing tasks)."""
     try:
+        print(f"📝 Adding {len(request.tasks)} tasks to faucet: {request.faucetAddress}")
+        
+        # 1. Validate Addresses
+        if not Web3.is_address(request.faucetAddress) or not Web3.is_address(request.userAddress):
+            raise HTTPException(status_code=400, detail="Invalid address format")
+        
+        # Validate chain ID
+        if request.chainId not in VALID_CHAIN_IDS:
+            raise HTTPException(status_code=400, detail=f"Invalid chainId: {request.chainId}")
+        
         faucet_address = Web3.to_checksum_address(request.faucetAddress)
         user_address = Web3.to_checksum_address(request.userAddress)
-       
-        tasks_dict = [task for task in request.tasks]
-       
+        
+        # 2. Get Web3 instance and Authorize User
+        w3 = await get_web3_instance(request.chainId)
+        
+        is_authorized = await check_user_is_authorized_for_faucet(w3, faucet_address, user_address)
+        if not is_authorized:
+            raise HTTPException(
+                status_code=403, 
+                detail="Access denied. User must be owner, admin, or backend address."
+            )
+
+        # 3. Fetch Existing Tasks
+        existing_tasks = []
+        try:
+            # We reuse your existing helper function
+            existing_data = await get_faucet_tasks(faucet_address)
+            if existing_data and "tasks" in existing_data:
+                existing_tasks = existing_data["tasks"]
+                print(f"found {len(existing_tasks)} existing tasks.")
+        except Exception as e:
+            print(f"No existing tasks found or DB error (continuing with empty list): {e}")
+            existing_tasks = []
+
+        # 4. Convert new tasks to dictionary format
+        new_tasks_dict = [task.dict() for task in request.tasks]
+
+        # 5. Append Logic (Merge lists)
+        # Note: You might want to filter duplicates here based on URL if necessary.
+        # For now, this simply adds the new ones to the end.
+        combined_tasks = existing_tasks + new_tasks_dict
+
+        # 6. Store the Combined List
+        result = await store_faucet_tasks(faucet_address, combined_tasks, user_address)
+        
+        print(f"✅ Successfully stored {len(combined_tasks)} total tasks for faucet {faucet_address}")
+        
         return {
             "success": True,
             "faucetAddress": faucet_address,
-            "tasksAdded": len(tasks_dict),
+            "tasksAdded": len(new_tasks_dict),
+            "totalTasks": len(combined_tasks),
             "userAddress": user_address,
             "chainId": request.chainId,
-            "data": {"mock": "data"},
-            "message": f"Successfully added {len(tasks_dict)} tasks (MOCK DB)"
+            "data": result,
+            "message": f"Successfully added tasks. Total tasks: {len(combined_tasks)}"
         }
+        
+    except HTTPException as e:
+        raise e
     except Exception as e:
+        print(f"💥 Error in add_faucet_tasks: {str(e)}")
+        # Log stack trace for easier debugging
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to add tasks: {str(e)}")
-   
+
+# --- USER PROFILE ENDPOINTS ---
+@app.post("/api/quests/draft", tags=["Quest Management"])
+async def save_quest_draft(draft: QuestDraft):
+    try:
+        # VALIDATION CHANGE: Only validate creator address. 
+        # Faucet address might be a "draft-UUID" string now, so we skip Web3.is_address check for it.
+        if not Web3.is_address(draft.creatorAddress):
+            raise HTTPException(status_code=400, detail="Invalid creator address")
+
+        # We keep the UUID or address as is for the DB key
+        faucet_address_val = draft.faucetAddress 
+        if Web3.is_address(faucet_address_val):
+             faucet_address_val = Web3.to_checksum_address(faucet_address_val)
+        
+        creator_address_cs = Web3.to_checksum_address(draft.creatorAddress)
+
+        draft_data_db = {
+            "faucet_address": faucet_address_val,
+            "creator_address": creator_address_cs,
+            "title": draft.title,
+            "description": draft.description,
+            "image_url": draft.imageUrl,
+            "reward_pool": draft.rewardPool,
+            "reward_token_type": draft.rewardTokenType,
+            "token_address": draft.tokenAddress,
+            "distribution_config": draft.distributionConfig,
+            "is_draft": True,
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat()
+        }
+
+        response = supabase.table("quests").upsert(
+            draft_data_db,
+            on_conflict="faucet_address"
+        ).execute()
+
+        if not response.data:
+            raise HTTPException(status_code=500, detail="Failed to save draft")
+
+        return {"success": True, "message": "Draft saved successfully", "faucetAddress": faucet_address_val}
+    except Exception as e:
+        print(f"Error saving draft: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.delete("/api/quests/draft/{draftId}", tags=["Quest Management"])
+async def delete_quest_draft(draftId: str):
+    """
+    Deletes a quest draft and its associated tasks from the database.
+    """
+    try:
+        print(f"🗑️ Deleting draft: {draftId}")
+        
+        # 1. Delete from Quests table
+        # We assume the draftId IS the faucet_address in the DB for drafts
+        response_q = supabase.table("quests").delete().eq("faucet_address", draftId).execute()
+        
+        # 2. Delete from Faucet Tasks table (clean up associated tasks)
+        response_t = supabase.table("faucet_tasks").delete().eq("faucet_address", draftId).execute()
+        
+        # Check if anything was actually deleted (Optional, but good for debugging)
+        # Note: supabase delete returns the deleted rows in .data
+        if not response_q.data and not response_t.data:
+             print("⚠️ Draft not found or already deleted.")
+             # We still return success so the frontend updates the UI
+        
+        return {"success": True, "message": "Draft deleted successfully"}
+        
+    except Exception as e:
+        print(f"❌ Error deleting draft: {str(e)}")
+        # Log stack trace for deeper debugging if needed
+        # traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- FINALIZE QUEST (Phase 2) ---
+@app.post("/api/quests/finalize", tags=["Quest Management"])
+async def finalize_quest(finalize: QuestFinalize):
+    """
+    Finalizes a quest. Fetches missing details from Draft ID if needed.
+    Fixes 'created_by' null error by ensuring creator address is stored with tasks.
+    """
+    try:
+        print(f"🚀 Finalizing Quest. Real Address: {finalize.faucetAddress}")
+
+        if not Web3.is_address(finalize.faucetAddress):
+            raise HTTPException(status_code=400, detail="Invalid faucet address")
+
+        real_address_cs = Web3.to_checksum_address(finalize.faucetAddress)
+        
+        # 1. FETCH DATA FROM DRAFT
+        draft_data = {}
+        if finalize.draftId:
+            draft_res = supabase.table("quests").select("*").eq("faucet_address", finalize.draftId).execute()
+            if draft_res.data:
+                draft_data = draft_res.data[0]
+        
+        # 2. DETERMINE FINAL CREATOR (Critical Step)
+        final_creator = finalize.creatorAddress
+        if not final_creator and draft_data.get("creator_address"):
+            final_creator = draft_data.get("creator_address")
+        
+        if not final_creator:
+            raise HTTPException(status_code=400, detail="Creator address is missing. Cannot finalize.")
+            
+        final_creator = Web3.to_checksum_address(final_creator)
+
+        # 3. MERGE METADATA
+        final_title = finalize.title or draft_data.get("title")
+        final_desc = finalize.description or draft_data.get("description")
+        final_img = finalize.imageUrl or draft_data.get("image_url")
+
+        # 4. UPSERT QUESTS TABLE
+        final_quest_data = {
+            "faucet_address": real_address_cs,
+            "creator_address": final_creator,
+            "title": final_title,
+            "description": final_desc,
+            "image_url": final_img,
+            "reward_pool": draft_data.get("reward_pool"),
+            "reward_token_type": draft_data.get("reward_token_type"),
+            "token_address": draft_data.get("token_address"),
+            "distribution_config": draft_data.get("distribution_config"),
+            "start_date": finalize.startDate,
+            "end_date": finalize.endDate,
+            "token_symbol": draft_data.get("token_symbol"),
+            "claim_window_hours": finalize.claimWindowHours,
+            "stage_pass_requirements": finalize.stagePassRequirements.dict(),
+            "is_draft": False,
+            "is_active": True,
+            "updated_at": datetime.now().isoformat()
+        }
+
+        supabase.table("quests").upsert(final_quest_data, on_conflict="faucet_address").execute()
+
+        # 5. UPSERT FAUCET_TASKS TABLE (Fixed: Added created_by)
+        tasks_data = {
+            "faucet_address": real_address_cs,
+            "created_by": final_creator,  # <--- THIS WAS MISSING
+            "tasks": [t.dict() for t in finalize.tasks],
+            "updated_at": datetime.now().isoformat()
+        }
+        supabase.table("faucet_tasks").upsert(tasks_data, on_conflict="faucet_address").execute()
+
+        # 6. DELETE OLD DRAFT
+        if finalize.draftId and finalize.draftId != finalize.faucetAddress:
+            supabase.table("quests").delete().eq("faucet_address", finalize.draftId).execute()
+            supabase.table("faucet_tasks").delete().eq("faucet_address", finalize.draftId).execute()
+
+        return {"success": True, "message": "Quest finalized and live!"}
+
+    except Exception as e:
+        print(f"❌ Error finalizing quest: {str(e)}")
+        # traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- OPTIONAL: List drafts for user ---
+@app.get("/api/quests/drafts/{creator_address}", tags=["Quest Management"])
+async def get_user_drafts(creator_address: str):
+    try:
+        if not Web3.is_address(creator_address):
+            raise HTTPException(status_code=400, detail="Invalid address")
+
+        creator_cs = Web3.to_checksum_address(creator_address)
+
+        response = supabase.table("quests").select("*").eq(
+            "creator_address", creator_cs
+        ).eq("is_draft", True).execute()
+
+        return {"success": True, "drafts": response.data or []}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+def generate_unique_referral_id():
+    """Generates a short, URL-friendly unique ID."""
+    return shortuuid.ShortUUID().random(length=8)   
+# This is the endpoint the WalletConnectButton calls
+@app.get("/api/profile/{wallet_address}")
+async def get_user_profile_data(wallet_address: str):
+    """
+    Called by the Wallet Button. 
+    Standardizes the address to lowercase to find the user.
+    """
+    try:
+        # Standardize input
+        search_address = wallet_address.lower()
+        
+        # Query Supabase
+        response = supabase.table("user_profiles")\
+            .select("*")\
+            .eq("wallet_address", search_address)\
+            .execute()
+        
+        if response.data and len(response.data) > 0:
+            # Found the user! Return their custom username
+            return {"success": True, "profile": response.data[0]}
+        else:
+            # User truly doesn't have a profile yet
+            return {"success": True, "profile": None, "message": "New User"}
+            
+    except Exception as e:
+        print(f"Error in wallet profile fetch: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+
+@app.post("/api/quests/{faucet_address}/join", tags=["Quest Actions"])
+async def join_quest(faucet_address: str, payload: JoinQuestRequest):
+    """
+    Registers a user for a quest. 
+    - Generates a unique referral ID for the new user.
+    - If a valid 'referralCode' is provided, awards 10 points to the referrer.
+    """
+    try:
+        # 1. Input Sanitization
+        if not Web3.is_address(faucet_address) or not Web3.is_address(payload.walletAddress):
+            raise HTTPException(status_code=400, detail="Invalid address format")
+            
+        faucet_address_cs = Web3.to_checksum_address(faucet_address)
+        user_address_cs = Web3.to_checksum_address(payload.walletAddress)
+
+        # 2. Check if user already exists
+        existing_user = supabase.table("quest_participants")\
+            .select("referral_id")\
+            .eq("quest_address", faucet_address_cs)\
+            .eq("wallet_address", user_address_cs)\
+            .execute()
+
+        if existing_user.data:
+            return {
+                "success": True, 
+                "message": "User already joined", 
+                "referralId": existing_user.data[0]['referral_id']
+            }
+
+        # 3. Handle Referral Logic (If user was invited)
+        if payload.referralCode:
+            # Find the referrer (must be in the SAME quest)
+            referrer_res = supabase.table("quest_participants")\
+                .select("wallet_address, points, referral_count")\
+                .eq("quest_address", faucet_address_cs)\
+                .eq("referral_id", payload.referralCode)\
+                .execute()
+            
+            if referrer_res.data:
+                referrer = referrer_res.data[0]
+                new_points = (referrer.get('points') or 0) + 10
+                new_count = (referrer.get('referral_count') or 0) + 1
+                
+                # Update Referrer Points (+10)
+                supabase.table("quest_participants").update({
+                    "points": new_points,
+                    "referral_count": new_count
+                }).eq("quest_address", faucet_address_cs)\
+                  .eq("referral_id", payload.referralCode)\
+                  .execute()
+                  
+                print(f"✅ Awarded 10 pts to referrer: {referrer['wallet_address']}")
+
+        # 4. Generate Unique Referral ID (Collision Check)
+        new_ref_id = generate_unique_referral_id()
+        # Simple loop to ensure absolute uniqueness (rare but safe)
+        while True:
+            check_dup = supabase.table("quest_participants").select("id").eq("referral_id", new_ref_id).execute()
+            if not check_dup.data:
+                break
+            new_ref_id = generate_unique_referral_id()
+
+        # 5. Insert New Participant
+        new_participant = {
+            "quest_address": faucet_address_cs,
+            "wallet_address": user_address_cs,
+            "referral_id": new_ref_id,
+            "points": 0,
+            "referral_count": 0,
+            "joined_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        supabase.table("quest_participants").insert(new_participant).execute()
+
+        return {
+            "success": True, 
+            "message": "Successfully joined quest", 
+            "referralId": new_ref_id
+        }
+
+    except Exception as e:
+        print(f"❌ Error joining quest: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/quests/{faucet_address}/checkin", tags=["Quest Actions"])
+async def daily_checkin(faucet_address: str, payload: CheckInRequest):
+    """
+    Performs a daily check-in for the user.
+    - Checks 24h cooldown.
+    - Awards 10 points.
+    - Updates 'last_checkin_at'.
+    - Logs a submission record for 'sys_daily'.
+    """
+    try:
+        # 1. Input Sanitization
+        if not Web3.is_address(faucet_address) or not Web3.is_address(payload.walletAddress):
+            raise HTTPException(status_code=400, detail="Invalid address format")
+
+        faucet_address_cs = Web3.to_checksum_address(faucet_address)
+        user_address_cs = Web3.to_checksum_address(payload.walletAddress)
+
+        # 2. Fetch User Data
+        user_res = supabase.table("quest_participants")\
+            .select("*")\
+            .eq("quest_address", faucet_address_cs)\
+            .eq("wallet_address", user_address_cs)\
+            .execute()
+
+        if not user_res.data:
+            raise HTTPException(status_code=404, detail="User not registered in this quest.")
+
+        user = user_res.data[0]
+        last_checkin = user.get("last_checkin_at")
+        
+        # 3. Verify Cooldown (24 Hours)
+        now = datetime.now(timezone.utc)
+        
+        if last_checkin:
+            last_checkin_dt = datetime.fromisoformat(last_checkin.replace('Z', '+00:00'))
+            next_available = last_checkin_dt + timedelta(hours=24)
+            
+            if now < next_available:
+                # Calculate remaining time for nice error message
+                remaining = next_available - now
+                hours, remainder = divmod(remaining.seconds, 3600)
+                minutes, _ = divmod(remainder, 60)
+                return {
+                    "success": False, 
+                    "message": f"Cooldown active. Try again in {hours}h {minutes}m."
+                }
+
+        # 4. Award Points & Update Timestamp
+        new_points = (user.get("points") or 0) + 10
+        
+        supabase.table("quest_participants").update({
+            "points": new_points,
+            "last_checkin_at": now.isoformat()
+        }).eq("quest_address", faucet_address_cs)\
+          .eq("wallet_address", user_address_cs)\
+          .execute()
+
+        # 5. Log Submission (So it shows as 'Completed' in the UI task list)
+        # We upsert using a composite key logic or just insert. 
+        # Ideally, you have a unique constraint on (wallet, quest, task_id) for one-time tasks, 
+        # but daily tasks might need a 'last_completed' field in submissions or just rely on participant table.
+        # Here we just log it for history.
+        
+        submission_entry = {
+            "faucet_address": faucet_address_cs,
+            "wallet_address": user_address_cs,
+            "task_id": "sys_daily",
+            "status": "approved",
+            "submitted_data": "Daily Check-in",
+            "submission_date": now.isoformat()
+        }
+        
+        # We upsert to ensure we don't clog DB if they somehow spam, 
+        # though logic above prevents spam.
+        # Note: You might want to generate a unique ID for this specific day's submission 
+        # if you want a history log, otherwise upserting by task_id keeps the table clean.
+        supabase.table("submissions").upsert(submission_entry).execute()
+
+        return {
+            "success": True, 
+            "message": "Daily check-in successful! +10 Points",
+            "newPoints": new_points
+        }
+
+    except Exception as e:
+        print(f"❌ Error during check-in: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/profile/update")
+async def update_user_profile(request: UserProfileUpdate):
+    """Update user details with signature verification."""
+    try:
+        address = Web3.to_checksum_address(request.wallet_address)
+        
+        # 1. Verify Signature
+        if not verify_signature(address, request.message, request.signature):
+            raise HTTPException(status_code=401, detail="Invalid signature. You are not the owner of this wallet.")
+
+        # 2. Prepare Data (Include new fields)
+        data = {
+            "wallet_address": address,
+            "username": request.username,
+            "email": request.email,
+            "bio": request.bio,
+            "twitter_handle": request.twitter_handle,
+            "discord_handle": request.discord_handle,
+            "telegram_handle": request.telegram_handle,   # NEW
+            "farcaster_handle": request.farcaster_handle, # NEW
+            "avatar_url": request.avatar_url,
+            
+            "updated_at": datetime.now().isoformat()
+        }
+
+        # 3. Upsert to Supabase
+        response = supabase.table("user_profiles").upsert(data).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=500, detail="Failed to save profile")
+            
+        return {"success": True, "message": "Profile updated successfully", "data": response.data[0]}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Profile update error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+      
 # API Endpoints for Claims and Tasks
 @app.post("/admin-popup-preference")
 async def save_admin_popup_preference_endpoint(request: AdminPopupPreferenceRequest):
@@ -5903,6 +6951,352 @@ async def get_user_usdt_status(
     except Exception as e:
         print(f"Error getting user status: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get user status: {str(e)}")
+
+@app.put("/api/quests/{faucet_address}")
+async def update_quest_details(
+    faucet_address: str, 
+    update: QuestUpdate
+):
+    """
+    Update Quest Details (Admin Only)
+    """
+    try:
+        # 1. Verify Quest Exists
+        # (In production, also verify the request comes from the creator)
+        
+        # 2. Prepare Update Data
+        # We only update fields that are not None
+        update_data = {k: v for k, v in update.dict().items() if v is not None}
+        
+        if not update_data:
+            return {"success": False, "message": "No data provided"}
+
+        # 3. Update in Supabase
+        # Assuming you have a 'quests' table. 
+        # If using the mock structure from previous steps, we just return success.
+        # REAL DB CALL EXAMPLE:
+        # response = supabase.table("quests").update(update_data).eq("faucet_address", faucet_address).execute()
+        
+        return {
+            "success": True, 
+            "message": "Quest updated successfully",
+            "updatedFields": update_data
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/quests/{faucet_address}/progress/{wallet_address}")
+async def get_user_progress(faucet_address: str, wallet_address: str):
+    """
+    Get real user progress from Supabase. Initializes new users if they don't exist.
+    """
+    try:
+        # Validate addresses
+        faucet_checksum = Web3.to_checksum_address(faucet_address)
+        wallet_checksum = Web3.to_checksum_address(wallet_address)
+
+        # 1. Fetch User Progress Record
+        response = supabase.table("user_progress")\
+            .select("*")\
+            .eq("wallet_address", wallet_checksum)\
+            .eq("faucet_address", faucet_checksum)\
+            .execute()
+        
+        user_data = None
+
+        # 2. Initialize if new user
+        if not response.data:
+            new_profile = {
+                "wallet_address": wallet_checksum,
+                "faucet_address": faucet_checksum,
+                "total_points": 0,
+                "stage_points": {"Beginner": 0, "Intermediate": 0, "Advance": 0, "Legend": 0, "Ultimate": 0},
+                "completed_tasks": [],
+                "current_stage": "Beginner"
+            }
+            # Insert and return the new row
+            insert_res = supabase.table("user_progress").insert(new_profile).execute()
+            if insert_res.data:
+                user_data = insert_res.data[0]
+        else:
+            user_data = response.data[0]
+
+        if not user_data:
+            raise HTTPException(status_code=500, detail="Failed to retrieve or create user progress")
+
+        # 3. Fetch User Submissions
+        subs_response = supabase.table("submissions")\
+            .select("*")\
+            .eq("wallet_address", wallet_checksum)\
+            .eq("faucet_address", faucet_checksum)\
+            .execute()
+        
+        submissions_data = subs_response.data or []
+
+        # 4. Format for Frontend (Snake_case DB -> CamelCase API)
+        formatted_progress = {
+            "totalPoints": user_data['total_points'],
+            "stagePoints": user_data['stage_points'],
+            "completedTasks": user_data['completed_tasks'] or [],
+            "currentStage": user_data['current_stage'],
+            "submissions": [
+                {
+                    "submissionId": s['submission_id'],
+                    "taskId": s['task_id'],
+                    "taskTitle": s['task_title'],
+                    "status": s['status'],
+                    "submittedData": s['submitted_data'],
+                    "submittedAt": s['submitted_at'],
+                    "notes": s['notes']
+                } 
+                for s in submissions_data
+            ]
+        }
+
+        return {"success": True, "progress": formatted_progress}
+
+    except Exception as e:
+        print(f"Error getting progress: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/api/quests/{faucet_address}/submissions")
+async def submit_task(
+    faucet_address: str,
+    walletAddress: str = Form(...),
+    taskId: str = Form(...),
+    submittedData: str = Form(None), # URL or Text
+    notes: str = Form(""),
+    submissionType: str = Form(...),
+    file: Optional[UploadFile] = File(None)
+):
+    try:
+        faucet_checksum = Web3.to_checksum_address(faucet_address)
+        wallet_checksum = Web3.to_checksum_address(walletAddress)
+
+        final_data_link = submittedData
+
+        # 1. Handle File Upload (if present)
+        if file:
+            # Validate file size/type here if needed (e.g. < 5MB)
+            file_ext = file.filename.split(".")[-1]
+            file_path = f"{faucet_checksum}/{wallet_checksum}/{uuid.uuid4()}.{file_ext}"
+            file_content = await file.read()
+            
+            # Upload to Supabase Storage
+            storage_response = supabase.storage.from_("quest-proofs").upload(
+                file_path, 
+                file_content, 
+                {"content-type": file.content_type, "upsert": "false"}
+            )
+            
+            # Get Public URL
+            final_data_link = supabase.storage.from_("quest-proofs").get_public_url(file_path)
+
+        # 2. Get Task Title (for easier admin display)
+        # Fetch tasks to find the title
+        _, tasks = await get_quest_context(faucet_checksum)
+        task_title = "Unknown Task"
+        if tasks:
+            found_task = next((t for t in tasks if t['id'] == taskId), None)
+            if found_task:
+                task_title = found_task.get('title', 'Unknown Task')
+
+        # 3. Insert Submission Record
+        submission_entry = {
+            "faucet_address": faucet_checksum,
+            "wallet_address": wallet_checksum,
+            "task_id": taskId,
+            "task_title": task_title,
+            "submitted_data": final_data_link,
+            "notes": notes,
+            "submission_type": submissionType,
+            "status": "pending",
+            "submitted_at": datetime.utcnow().isoformat()
+        }
+        
+        res = supabase.table("submissions").insert(submission_entry).execute()
+        
+        if not res.data:
+             raise HTTPException(status_code=500, detail="Failed to save submission")
+
+        return {"success": True, "message": "Submission received", "submissionId": res.data[0]['submission_id']}
+
+    except Exception as e:
+        print(f"Submission error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/quests/{faucet_address}/submissions/{submission_id}")
+async def update_submission(
+    faucet_address: str,
+    submission_id: str,
+    update: SubmissionUpdate
+):
+    try:
+        faucet_checksum = Web3.to_checksum_address(faucet_address)
+
+        # 1. Update status in 'submissions' table
+        now = datetime.utcnow().isoformat()
+        sub_update = supabase.table("submissions").update({
+            "status": update.status, 
+            "reviewed_at": now
+        }).eq("submission_id", submission_id).execute()
+
+        if not sub_update.data:
+            raise HTTPException(status_code=404, detail="Submission not found")
+        
+        submission = sub_update.data[0]
+        wallet_checksum = submission['wallet_address']
+        task_id = submission['task_id']
+
+        # 2. Logic for Approval
+        if update.status == "approved":
+            # A. Fetch Context (Requirements and Task Data)
+            stage_reqs, tasks = await get_quest_context(faucet_checksum)
+            
+            if not tasks:
+                raise HTTPException(status_code=500, detail="Quest tasks configuration not found")
+
+            # Find the specific task to get points and stage
+            task = next((t for t in tasks if t['id'] == task_id), None)
+            
+            if task:
+                points_to_add = int(task.get('points', 0))
+                task_stage = task.get('stage', 'Beginner')
+
+                # B. Fetch Current User Progress
+                prog_res = supabase.table("user_progress")\
+                    .select("*")\
+                    .eq("wallet_address", wallet_checksum)\
+                    .eq("faucet_address", faucet_checksum)\
+                    .execute()
+                
+                if not prog_res.data:
+                    raise HTTPException(status_code=404, detail="User progress not found")
+                
+                curr_prog = prog_res.data[0]
+                
+                # C. Calculate New Values
+                # Update Total Points
+                new_total = curr_prog['total_points'] + points_to_add
+                
+                # Update Stage Points (JSONB)
+                current_stage_points = curr_prog['stage_points'] or {}
+                # Ensure keys exist
+                if task_stage not in current_stage_points:
+                    current_stage_points[task_stage] = 0
+                current_stage_points[task_stage] += points_to_add
+                
+                # Update Completed Tasks (Array)
+                completed_list = curr_prog['completed_tasks'] or []
+                if task_id not in completed_list:
+                    completed_list.append(task_id)
+
+                # Calculate New Stage Level
+                new_stage_name = calculate_current_stage(current_stage_points, stage_reqs) if stage_reqs else curr_prog['current_stage']
+
+                # D. Commit Updates to DB
+                supabase.table("user_progress").update({
+                    "total_points": new_total,
+                    "stage_points": current_stage_points,
+                    "completed_tasks": completed_list,
+                    "current_stage": new_stage_name
+                }).eq("wallet_address", wallet_checksum).eq("faucet_address", faucet_checksum).execute()
+
+        return {"success": True, "message": f"Submission {update.status}"}
+
+    except Exception as e:
+        print(f"Update submission error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/quests/{faucet_address}/submissions/pending")
+async def get_pending_submissions_endpoint(faucet_address: str):
+    try:
+        faucet_checksum = Web3.to_checksum_address(faucet_address)
+        
+        # Query submissions where status is 'pending'
+        response = supabase.table("submissions")\
+            .select("*")\
+            .eq("faucet_address", faucet_checksum)\
+            .eq("status", "pending")\
+            .order("submitted_at", desc=True)\
+            .execute()
+        
+        formatted = [
+            {
+                "submissionId": s['submission_id'],
+                "walletAddress": s['wallet_address'],
+                "taskId": s['task_id'],
+                "taskTitle": s['task_title'],
+                "submittedData": s['submitted_data'],
+                "notes": s['notes'],
+                "submittedAt": s['submitted_at']
+            } for s in response.data
+        ]
+        return {"success": True, "submissions": formatted, "count": len(formatted)}
+    except Exception as e:
+        print(e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/quests/{faucet_address}/leaderboard")
+async def get_leaderboard_endpoint(faucet_address: str):
+    try:
+        faucet_checksum = Web3.to_checksum_address(faucet_address)
+
+        # 1. Get top 50 users by total_points from progress table
+        progress_response = supabase.table("user_progress")\
+            .select("wallet_address, total_points, completed_tasks")\
+            .eq("faucet_address", faucet_checksum)\
+            .order("total_points", desc=True)\
+            .limit(50)\
+            .execute()
+        
+        progress_data = progress_response.data or []
+        
+        if not progress_data:
+            return {"success": True, "leaderboard": []}
+
+        # 2. Extract wallet addresses to fetch profiles
+        wallet_addresses = [row['wallet_address'] for row in progress_data]
+
+        # 3. Fetch profiles for these users
+        profiles_response = supabase.table("user_profiles")\
+            .select("wallet_address, username, avatar_url")\
+            .in_("wallet_address", wallet_addresses)\
+            .execute()
+            
+        # Create a lookup dictionary for profiles
+        # Format: { '0x123...': { 'username': 'JohnDoe', 'avatar': 'http...' } }
+        profiles_map = {
+            p['wallet_address']: p for p in profiles_response.data
+        }
+
+        # 4. Merge Data
+        leaderboard = []
+        for i, row in enumerate(progress_data):
+            wallet = row['wallet_address']
+            profile = profiles_map.get(wallet, {})
+            
+            # Use Username if available, otherwise fallback to shortened address
+            username = profile.get('username')
+            if not username:
+                username = f"{wallet[:6]}...{wallet[-4:]}"
+            
+            leaderboard.append({
+                "rank": i + 1,
+                "walletAddress": wallet,
+                "username": username,
+                "avatarUrl": profile.get('avatar_url'),
+                "points": row['total_points'],
+                "completedTasks": len(row['completed_tasks'] or [])
+            })
+            
+        return {"success": True, "leaderboard": leaderboard}
+
+    except Exception as e:
+        print(f"Leaderboard error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/usdt-contracts")
 async def get_usdt_contracts():
     """Get known USDT contract addresses for supported networks."""
@@ -6028,6 +7422,98 @@ async def save_faucet_metadata(metadata: FaucetMetadata):
             status_code=500,
             detail=f"Failed to save metadata: {str(e)}"
         )
+
+
+# --- API Endpoints ---
+
+@app.post("/register-faucet")
+async def register_faucet_endpoint(request: RegisterFaucetRequest):
+    """
+    Registers a new faucet in the 'userfaucets' table.
+    """
+    try:
+        print(f"📝 Registering new faucet: {request.name} ({request.faucetAddress})")
+
+        if not Web3.is_address(request.faucetAddress) or not Web3.is_address(request.ownerAddress):
+            raise HTTPException(status_code=400, detail="Invalid address format")
+
+        # --- FIX: CONVERT TO LOWERCASE FOR DB STORAGE ---
+        faucet_address_lower = request.faucetAddress.lower()
+        owner_address_lower = request.ownerAddress.lower()
+
+        data = {
+            "faucet_address": faucet_address_lower, # Stored as lowercase
+            "owner_address": owner_address_lower,   # Stored as lowercase
+            "chain_id": request.chainId,
+            "faucet_type": request.faucetType,
+            "name": request.name,
+            "created_at": datetime.now().isoformat()
+        }
+
+        # UPDATED: Table name is now 'userfaucets'
+        response = supabase.table("userfaucets").upsert(
+            data, 
+            on_conflict="faucet_address"
+        ).execute()
+
+        if not response.data:
+            raise HTTPException(status_code=500, detail="Failed to register faucet in database")
+
+        # For logging, we can still use checksum if desired, but DB has lowercase
+        print(f"✅ Faucet registered in userfaucets: {faucet_address_lower}")
+        
+        return {
+            "success": True,
+            "message": "Faucet registered successfully",
+            "data": response.data[0]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"💥 Error registering faucet: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+@app.get("/user-faucets/{user_address}")
+async def get_user_faucets_endpoint(user_address: str):
+    """
+    Fetches all faucets from 'userfaucets' for a specific user.
+    """
+    try:
+        if not Web3.is_address(user_address):
+            raise HTTPException(status_code=400, detail="Invalid user address")
+
+        # FIX: Convert to lowercase to match the data stored by the sync script
+        owner_address_lower = user_address.lower()
+
+        # Query Supabase using the lowercase address
+        response = supabase.table("userfaucets").select("*").eq(
+            "owner_address", owner_address_lower
+        ).order("created_at", desc=True).execute()
+
+        faucets = response.data or []
+
+        formatted_faucets = []
+        for f in faucets:
+            formatted_faucets.append({
+                # Return checksummed addresses to the frontend for display consistency
+                "faucetAddress": Web3.to_checksum_address(f.get("faucet_address")),
+                "ownerAddress": Web3.to_checksum_address(f.get("owner_address")),
+                "chainId": f.get("chain_id"),
+                "faucetType": f.get("faucet_type"),
+                "name": f.get("name"),
+                "createdAt": f.get("created_at")
+            })
+
+        return {
+            "success": True,
+            "faucets": formatted_faucets,
+            "count": len(formatted_faucets)
+        }
+
+    except Exception as e:
+        print(f"💥 Error fetching user faucets: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch faucets: {str(e)}")
+
 @app.get("/faucet-metadata/{faucetAddress}")
 async def get_faucet_metadata(faucetAddress: str):
     """Get faucet description and image"""
@@ -6057,7 +7543,7 @@ async def get_faucet_metadata(faucetAddress: str):
             "success": True,
             "faucetAddress": faucet_address,
             "description": None,
-            "imageUrl": None,
+            "imageUrl": None,                                                                                                                                                               
             "message": "No metadata found for this faucet"
         }
        
