@@ -83,6 +83,8 @@ const SUPPORTED_CHAIN_IDS = [
   42161,  // Arbitrum One (ADDED - THIS WAS MISSING!)
   421614, // Arbitrum Sepolia
   137,    // Polygon Mainnet
+  56,
+  43114,
 ];
 
 // Optional: chains where Divvi should be disabled even if technically supported

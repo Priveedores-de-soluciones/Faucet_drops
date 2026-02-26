@@ -10,30 +10,17 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardDescription }
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-// NOTE: These utility functions must be implemented in your lib/faucet.ts
-import { getFaucetsForNetwork, getFaucetDetailsFromFactory } from "@/lib/faucet"; 
+import { getFaucetsForNetwork, getFaucetDetailsFromFactory, FactoryType } from "@/lib/faucet"; 
 import { formatUnits, Contract, ZeroAddress, JsonRpcProvider } from "ethers";
-import { Coins, Clock, Search, Filter, SortAsc, X, ArrowLeft } from "lucide-react";
+import { Coins, Clock, Search, Filter, SortAsc, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { ERC20_ABI } from "@/lib/abis";
 import { Header } from "@/components/header";
 import Link from "next/link";
 
-// --- CONFIGURATION PLACEHOLDERS ---
-// ⚠️ IMPORTANT: Replace this ABI with the correct one for your Faucet Factory Contracts
-const FAUCET_FACTORY_ABI = [
-  "function getAllFaucets() view returns (address[])",
-  "function getFaucetDetails(address faucetAddress) view returns ((address faucetAddress, address owner, string name, uint256 claimAmount, address tokenAddress, uint256 startTime, uint256 endTime, bool isClaimActive, uint256 balance, bool isEther, bool useBackend))",
-];
-// ⚠️ IMPORTANT: These helper functions must exist in your project for this code to run.
-// The implementation of getFaucetsForNetwork must iterate over all network.factoryAddresses 
-// and call getAllFaucets on each one, returning a merged FaucetMeta[] list.
-// The implementation of getFaucetDetailsFromFactory must call getFaucetDetails on the specific factory.
-// --- END: CONFIGURATION PLACEHOLDERS ---
-
 const DEFAULT_FAUCET_IMAGE = "/default.jpeg";
 
-// 🌟 LIGHTWEIGHT STRUCTURE (For sorting/filtering all faucets)
+// 🌟 LIGHTWEIGHT STRUCTURE
 interface FaucetMeta {
   faucetAddress: string;
   isClaimActive: boolean;
@@ -45,7 +32,7 @@ interface FaucetMeta {
   factoryAddress: string; 
 }
 
-// 🌟 FULL DETAIL STRUCTURE (For rendering the current page)
+// 🌟 FULL DETAIL STRUCTURE
 interface FaucetData {
   faucetAddress: string;
   name?: string;
@@ -64,6 +51,7 @@ interface FaucetData {
   imageUrl?: string;
   owner?: string;
   factoryAddress: string;
+  faucetType?: FactoryType; 
 }
 
 const FILTER_OPTIONS = {
@@ -78,13 +66,10 @@ const SORT_OPTIONS = {
   DEFAULT: 'default', 
   NAME_ASC: 'name_asc',
   NAME_DESC: 'name_desc',
-  // NOTE: We remove Balance/Amount sorts as this data is not loaded in FaucetMeta
 } as const;
 
 type FilterOption = typeof FILTER_OPTIONS[keyof typeof FILTER_OPTIONS];
 type SortOption = typeof SORT_OPTIONS[keyof typeof SORT_OPTIONS];
-
-// --- NEW UTILITY FUNCTION ---
 
 interface DeletedFaucetResponse {
     success: boolean;
@@ -92,37 +77,19 @@ interface DeletedFaucetResponse {
     deletedAddresses: string[];
 }
 
-/**
- * Fetches the list of all faucet addresses marked as deleted in the off-chain database.
- * @returns A promise that resolves to a Set of lowercase deleted faucet addresses.
- */
 async function fetchDeletedFaucetsSet(): Promise<Set<string>> {
     try {
-        // NOTE: Replace the URL below with your actual backend base URL if it differs
         const response = await fetch("https://fauctdrop-backend.onrender.com/deleted-faucets");
-        
-        if (!response.ok) {
-            console.error("Backend failed to return deleted faucet list.");
-            return new Set();
-        }
-
+        if (!response.ok) return new Set();
         const result: DeletedFaucetResponse = await response.json();
-        
         if (result.success && result.deletedAddresses) {
-            // Convert all addresses to lowercase for case-insensitive checking
-            const deletedSet = new Set(result.deletedAddresses.map(addr => addr.toLowerCase()));
-            console.log(`Fetched ${deletedSet.size} deleted faucet addresses from backend for filtering.`);
-            return deletedSet;
+            return new Set(result.deletedAddresses.map(addr => addr.toLowerCase()));
         }
         return new Set();
     } catch (error) {
-        console.error("Failed to fetch deleted faucet list from backend:", error);
         return new Set();
     }
 }
-
-// --- END: NEW UTILITY FUNCTION ---
-// --- UTILITY HOOKS AND HELPERS (Original Code) ---
 
 function useWindowSize() {
   const [windowSize, setWindowSize] = useState<{ width: number; height: number }>({
@@ -174,12 +141,10 @@ const loadFaucetMetadata = async (faucetAddress: string): Promise<{description?:
 const getNativeTokenSymbol = (networkName: string): string => {
   switch (networkName) {
     case "Celo": return "CELO"
-    case "Lisk":
+    case "Lisk": return "LISK" // Fixed Lisk symbol
     case "Arbitrum":
     case "Base":
     case "Ethereum": return "ETH"
-    case "Polygon": return "MATIC"
-    case "Optimism": return "ETH"
     default: return "ETH"
   }
 }
@@ -188,7 +153,6 @@ const getDefaultDescription = (networkName: string, ownerAddress: string): strin
   return `This is a faucet on ${networkName} by ${ownerAddress.slice(0, 6)}...${ownerAddress.slice(-4)}`;
 }
 
-// TokenBalance component (unchanged)
 function TokenBalance({ tokenAddress, tokenSymbol, tokenDecimals, isNativeToken, networkChainId }: { tokenAddress: string; tokenSymbol: string; tokenDecimals: number; isNativeToken: boolean; networkChainId: number; }) {
   const { provider, address } = useWallet();
   const [balance, setBalance] = useState<string>("0");
@@ -207,13 +171,11 @@ function TokenBalance({ tokenAddress, tokenSymbol, tokenDecimals, isNativeToken,
         const formattedBalance = Number(formatUnits(balance, tokenDecimals)).toFixed(4);
         setBalance(formattedBalance);
       } catch (error) {
-        console.error("Error fetching balance:", error);
         setBalance("0");
-        toast({ title: "Failed to fetch balance", description: "Please try again later.", variant: "destructive", });
       } finally { setLoading(false); }
     };
     fetchBalance();
-  }, [provider, address, tokenAddress, tokenDecimals, isNativeToken, networkChainId, toast]);
+  }, [provider, address, tokenAddress, tokenDecimals, isNativeToken, networkChainId]);
 
   return (
     <Card className="overflow-hidden">
@@ -229,7 +191,6 @@ function TokenBalance({ tokenAddress, tokenSymbol, tokenDecimals, isNativeToken,
   );
 }
 
-// FaucetCard component (unchanged)
 function FaucetCard({ faucet, onNetworkSwitch }: { faucet: FaucetData; onNetworkSwitch: () => Promise<void> }) {
   const { chainId } = useWallet();
   const isOnCorrectNetwork = chainId === faucet.network?.chainId;
@@ -249,8 +210,7 @@ function FaucetCard({ faucet, onNetworkSwitch }: { faucet: FaucetData; onNetwork
         const days = Math.floor(diff / (1000 * 60 * 60 * 24));
         const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
         const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-        setStartCountdown(`${days}d ${hours}h ${minutes}m ${seconds}s until active`);
+        setStartCountdown(`${days}d ${hours}h ${minutes}m until active`);
       } else {
         setStartCountdown("Already Active");
       }
@@ -260,8 +220,7 @@ function FaucetCard({ faucet, onNetworkSwitch }: { faucet: FaucetData; onNetwork
         const days = Math.floor(diff / (1000 * 60 * 60 * 24));
         const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
         const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-        setEndCountdown(`${days}d ${hours}h ${minutes}m ${seconds}s until inactive`);
+        setEndCountdown(`${days}d ${hours}h ${minutes}m until inactive`);
       } else if (end > 0 && end <= now) {
         setEndCountdown("Ended");
       } else {
@@ -279,7 +238,6 @@ function FaucetCard({ faucet, onNetworkSwitch }: { faucet: FaucetData; onNetwork
 
   return (
     <Card className="relative w-full max-w-[400px] mx-auto">
-     
       <CardHeader className="pb-1 sm:pb-2 px-3 sm:px-4">
         <CardTitle className="text-sm sm:text-base md:text-lg flex items-center justify-between ">
           <span className="truncate">{faucet.name || `${displayTokenSymbol} Faucet`}</span>
@@ -365,10 +323,16 @@ function FaucetCard({ faucet, onNetworkSwitch }: { faucet: FaucetData; onNetwork
           <div className="flex justify-between items-center gap-2">
             <span className="text-muted-foreground">Drip Amount:</span>
             <span className="font-medium truncate">
-              {faucet.claimAmount
-                ? Number(formatUnits(faucet.claimAmount, faucet.tokenDecimals || 18)).toFixed(4)
-                : "0"}{" "}
-              {displayTokenSymbol}
+              {faucet.faucetType === 'custom' ? (
+                "Custom"
+              ) : (
+                <>
+                  {faucet.claimAmount
+                    ? Number(formatUnits(faucet.claimAmount, faucet.tokenDecimals || 18)).toFixed(4)
+                    : "0"}{" "}
+                  {displayTokenSymbol}
+                </>
+              )}
             </span>
           </div>
           <div className="flex justify-between items-center gap-2">
@@ -403,11 +367,9 @@ function FaucetCard({ faucet, onNetworkSwitch }: { faucet: FaucetData; onNetwork
   );
 }
 
-// Search and Filter Controls (unchanged)
 function SearchAndFilterControls({ searchTerm, setSearchTerm, filterBy, setFilterBy, sortBy, setSortBy, onClearFilters, hasActiveFilters }: { searchTerm: string; setSearchTerm: (term: string) => void; filterBy: FilterOption; setFilterBy: (filter: FilterOption) => void; sortBy: SortOption; setSortBy: (sort: SortOption) => void; onClearFilters: () => void; hasActiveFilters: boolean; }) {
   return (
     <div className="flex flex-col gap-3 sm:gap-4 mb-4 sm:mb-6">
-      {/* Search Bar */}
       <div className="relative">
         <div className="flex items-center border border-input rounded-md h-8 sm:h-9 w-full">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -430,7 +392,6 @@ function SearchAndFilterControls({ searchTerm, setSearchTerm, filterBy, setFilte
         </div>
       </div>
 
-      {/* Filter and Sort Controls */}
       <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
         <div className="flex items-center gap-2 flex-1">
           <div className="flex items-center border border-input rounded-md h-8 sm:h-9 px-2 w-full">
@@ -482,9 +443,6 @@ function SearchAndFilterControls({ searchTerm, setSearchTerm, filterBy, setFilte
   );
 }
 
-
-// --- MAIN COMPONENT: NetworkFaucets ---
-
 export default function NetworkFaucets() {
   const { chainId: chainIdStr } = useParams<{ chainId: string }>();
   const router = useRouter();
@@ -493,35 +451,26 @@ export default function NetworkFaucets() {
   const { toast } = useToast();
   const { goBack } = usePreviousPage();
   
-  // 🌟 State for ALL faucet metadata (lightweight)
   const [allFaucetsMeta, setAllFaucetsMeta] = useState<FaucetMeta[]>([]); 
-  // 🌟 State for current page's FULL details (heavy)
   const [currentPageDetails, setCurrentPageDetails] = useState<FaucetData[]>([]);
-
   const [loadingInitial, setLoadingInitial] = useState(true); 
   const [loadingPageDetails, setLoadingPageDetails] = useState(false); 
-  
   const [page, setPage] = useState(1);
   const [switchingNetwork, setSwitchingNetwork] = useState(false);
   const { width, height } = useWindowSize();
 
-  // Search and filter states
   const [searchTerm, setSearchTerm] = useState("");
   const [filterBy, setFilterBy] = useState<FilterOption>(FILTER_OPTIONS.ALL);
   const [sortBy, setSortBy] = useState<SortOption>(SORT_OPTIONS.DEFAULT);
 
-  // Parse chainId and find network
   const chainId = chainIdStr ? parseInt(chainIdStr, 10) : NaN;
   const network = !isNaN(chainId) ? networks.find((n) => n.chainId === chainId) : undefined;
 
-  // Calculate faucetsPerPage
   const calculateFaucetsPerPage = useCallback(() => {
-    // Determine responsive pagination size (e.g., 6 for desktop, 3 for mobile)
     const columns = width < 640 ? 1 : width < 1024 ? 2 : 3;
-    let cardsPerColumn = Math.floor((height * 0.7) / 350); // Estimate card height ~350px, use 70% of screen height
+    let cardsPerColumn = Math.floor((height * 0.7) / 350); 
     cardsPerColumn = Math.max(1, cardsPerColumn);
     let faucetsPerPage = cardsPerColumn * columns;
-
     faucetsPerPage = Math.max(3, Math.min(12, faucetsPerPage));
     return faucetsPerPage;
   }, [width, height]);
@@ -536,12 +485,9 @@ export default function NetworkFaucets() {
     }
   }, [calculateFaucetsPerPage, faucetsPerPage]);
 
-
-  // 🌟 STEP 1: Filter and sort the ALL FAUCET METADATA (Lightweight)
   const filteredAndSortedMeta = useMemo(() => {
     let filtered = [...allFaucetsMeta]; 
 
-    // Apply search filter
     if (searchTerm.trim()) {
       const search = searchTerm.toLowerCase().trim();
       filtered = filtered.filter((faucet) => {
@@ -552,7 +498,6 @@ export default function NetworkFaucets() {
       });
     }
 
-    // Apply type filter
     if (filterBy !== FILTER_OPTIONS.ALL) {
       filtered = filtered.filter((faucet) => {
         switch (filterBy) {
@@ -565,7 +510,6 @@ export default function NetworkFaucets() {
       });
     }
 
-    // Apply sorting (Only supports sorting by active status and creation time/name)
     filtered.sort((a, b) => {
       switch (sortBy) {
         case SORT_OPTIONS.DEFAULT:
@@ -591,34 +535,21 @@ export default function NetworkFaucets() {
     return filtered;
   }, [allFaucetsMeta, searchTerm, filterBy, sortBy]);
 
-
-  // 🌟 CORE FUNCTION 1: Load ALL Faucet Addresses/Minimal Metadata (FAST)
-const loadAllFaucetsMetadata = useCallback(async () => {
+  const loadAllFaucetsMetadata = useCallback(async () => {
     if (!network || isNaN(chainId)) return;
 
     setLoadingInitial(true);
     
     try {
         const networkProvider = new JsonRpcProvider(network.rpcUrl);
-        
-        // 1. Fetch the list of permanently deleted addresses from the backend
         const deletedAddressesSet = await fetchDeletedFaucetsSet();
-
-        // 2. CRITICAL: This function must fetch ALL faucets on-chain without filtering,
-        // (assuming getFaucetsForNetwork in lib/faucet.ts calls factory.getAllFaucets()).
-        // We do the filtering here.
-        // NOTE: If your lib/faucet.ts implementation still includes the RPC check, remove it there.
         const allFetchedMeta: FaucetMeta[] = await getFaucetsForNetwork(network, networkProvider);
-        
-        // 3. Filter the list using the off-chain database index
         const activeMetaList = allFetchedMeta.filter(meta => {
             return !deletedAddressesSet.has(meta.faucetAddress.toLowerCase());
         });
 
         setAllFaucetsMeta(activeMetaList);
         setPage(1); 
-        console.log(`✅ Loaded ${allFetchedMeta.length} faucets. Filtered ${allFetchedMeta.length - activeMetaList.length} deleted faucets via backend check. Total active: ${activeMetaList.length}.`);
-
     } catch (error) {
         console.error("❌ Error loading all faucet metadata:", error);
         toast({ title: "Failed to load faucet list", variant: "destructive" });
@@ -626,9 +557,8 @@ const loadAllFaucetsMetadata = useCallback(async () => {
     } finally {
         setLoadingInitial(false);
     }
-}, [network, chainId, toast]);
+  }, [network, chainId, toast]);
 
-  // 🌟 CORE FUNCTION 2: Load Full Details for the Current Page (Heavy Fetch)
   const loadCurrentPageDetails = useCallback(async (
       page: number, 
       perPage: number, 
@@ -644,7 +574,6 @@ const loadAllFaucetsMetadata = useCallback(async () => {
       setCurrentPageDetails([]); 
 
       try {
-          // 1. Determine the FaucetMeta objects for the current page
           const startIndex = (page - 1) * perPage;
           const endIndex = page * perPage;
           const metaToFetch = sortedMeta.slice(startIndex, endIndex);
@@ -655,20 +584,35 @@ const loadAllFaucetsMetadata = useCallback(async () => {
 
           const networkProvider = new JsonRpcProvider(network.rpcUrl);
 
-          // 2. Fetch the full details in parallel, calling the correct factory for each faucet
           const detailPromises = metaToFetch.map(async (meta) => {
-              // 🌟 CRITICAL: Call the specific factory using the address stored in meta
+              // 1. Fetch details
               const faucetDetail = await getFaucetDetailsFromFactory(
                   meta.factoryAddress, 
                   meta.faucetAddress, 
                   networkProvider
               );
               
-              // 3. Load off-chain metadata (description and image) and merge
+              // 2. Load off-chain metadata
               const metadata = await loadFaucetMetadata(faucetDetail.faucetAddress);
               
+              // 3. CORRECT TYPE DETECTION: 
+              // Compare the factory address from the meta against the network config.
+              // This is more reliable than RPC detection which might fail/timeout.
+              let correctedType = faucetDetail.faucetType;
+              
+              if (network.factories) {
+                  if (network.factories.custom?.toLowerCase() === meta.factoryAddress.toLowerCase()) {
+                      correctedType = 'custom';
+                  } else if (network.factories.dropcode?.toLowerCase() === meta.factoryAddress.toLowerCase()) {
+                      correctedType = 'dropcode';
+                  } else if (network.factories.droplist?.toLowerCase() === meta.factoryAddress.toLowerCase()) {
+                      correctedType = 'droplist';
+                  }
+              }
+
               return {
                   ...faucetDetail,
+                  faucetType: correctedType, // Force the correct type from config
                   network: network,
                   tokenSymbol: faucetDetail.tokenSymbol || 
                       (faucetDetail.isEther ? getNativeTokenSymbol(network.name) : "TOK"),
@@ -679,12 +623,11 @@ const loadAllFaucetsMetadata = useCallback(async () => {
                           : `A faucet for ${faucetDetail.tokenSymbol || 'tokens'} on ${network.name}`
                   ),
                   createdAt: meta.createdAt || faucetDetail.createdAt,
-                  tokenDecimals: faucetDetail.tokenDecimals || 18, // Ensure decimals is set
+                  tokenDecimals: faucetDetail.tokenDecimals || 18,
               } as FaucetData;
           });
           
           const detailedFaucets: FaucetData[] = await Promise.all(detailPromises);
-
           setCurrentPageDetails(detailedFaucets);
       } catch (error) {
           console.error("❌ Error loading page details:", error);
@@ -694,11 +637,8 @@ const loadAllFaucetsMetadata = useCallback(async () => {
       }
   }, [network, chainId, toast, faucetsPerPage]);
 
-
-  // Effect 1: Trigger initial load of ALL addresses/minimal metadata 
   useEffect(() => {
     if (isNaN(chainId) || !network) {
-      console.log("❌ Invalid chainId or network not found", { chainId, network, chainIdStr });
       setLoadingInitial(false);
       toast({
         title: "Network Not Found",
@@ -708,12 +648,9 @@ const loadAllFaucetsMetadata = useCallback(async () => {
       router.push("/");
       return;
     }
-
     loadAllFaucetsMetadata();
   }, [chainId, network, router, toast, loadAllFaucetsMetadata, chainIdStr]);
   
-
-  // Effect 2: Trigger detailed page load whenever page/filters/perPage changes
   useEffect(() => {
     if (!loadingInitial && filteredAndSortedMeta.length > 0) {
         loadCurrentPageDetails(page, faucetsPerPage, filteredAndSortedMeta);
@@ -721,31 +658,20 @@ const loadAllFaucetsMetadata = useCallback(async () => {
         setCurrentPageDetails([]);
         setLoadingPageDetails(false);
     }
-  }, [
-    page, 
-    faucetsPerPage, 
-    filteredAndSortedMeta,
-    loadingInitial, 
-    loadCurrentPageDetails
-  ]);
+  }, [page, faucetsPerPage, filteredAndSortedMeta, loadingInitial, loadCurrentPageDetails]);
 
-  // Handle page reset on filter change
   useEffect(() => {
     setPage(1);
   }, [searchTerm, filterBy, sortBy]);
-
 
   const handleNetworkSwitch = async (targetChainId: number) => {
     setSwitchingNetwork(true);
     try {
       const targetNetwork = networks.find((n) => n.chainId === targetChainId);
-      if (!targetNetwork) {
-        throw new Error(`Target network with chainId ${targetChainId} not found`);
-      }
+      if (!targetNetwork) throw new Error(`Target network with chainId ${targetChainId} not found`);
       setNetwork(targetNetwork);
       await ensureCorrectNetwork(targetChainId);
     } catch (error) {
-      console.error("❌ Error switching network:", error);
       toast({ title: "Network switch failed", description: "Failed to switch network. Please try again.", variant: "destructive", });
     } finally {
       setSwitchingNetwork(false);
@@ -760,17 +686,9 @@ const loadAllFaucetsMetadata = useCallback(async () => {
   };
 
   const hasActiveFilters = searchTerm.trim() !== "" || filterBy !== FILTER_OPTIONS.ALL || sortBy !== SORT_OPTIONS.DEFAULT;
-
-  
-  // Total pages based on the FILTERED/SORTED META LIST
   const totalPages = Math.ceil(filteredAndSortedMeta.length / faucetsPerPage);
-  
-  // The actual faucets to render are in currentPageDetails
   const faucetsToRender = currentPageDetails;
-  
-  // Show the global loading state
   const isLoading = loadingInitial || loadingPageDetails;
-
 
   const getPageButtons = () => {
     const buttons = [];
@@ -785,15 +703,7 @@ const loadAllFaucetsMetadata = useCallback(async () => {
 
     for (let p = start; p <= end; p++) {
       buttons.push(
-        <Button
-          key={p}
-          variant={p === page ? "default" : "outline"}
-          size="sm"
-          onClick={() => setPage(p)}
-          className="w-8 h-8 sm:w-9 sm:h-9 text-xs sm:text-sm"
-        >
-          {p}
-        </Button>
+        <Button key={p} variant={p === page ? "default" : "outline"} size="sm" onClick={() => setPage(p)} className="w-8 h-8 sm:w-9 sm:h-9 text-xs sm:text-sm">{p}</Button>
       );
     }
 
@@ -801,7 +711,6 @@ const loadAllFaucetsMetadata = useCallback(async () => {
       if (end < totalPages - 1) buttons.push(<span key="end-ellipsis" className="text-xs sm:text-sm">...</span>);
       buttons.push(<Button key={totalPages} variant={totalPages === page ? "default" : "outline"} size="sm" onClick={() => setPage(totalPages)} className="w-8 h-8 sm:w-9 sm:h-9 text-xs sm:text-sm">{totalPages}</Button>);
     }
-
     return buttons;
   };
 
@@ -811,17 +720,7 @@ const loadAllFaucetsMetadata = useCallback(async () => {
 
   return (
     <div className="container mx-auto px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6 md:py-8 space-y-4 sm:space-y-6">
-      {/* Header with Back Button */}
       <div className="flex items-center gap-4 mb-6">
-        <Button 
-          variant="outline" 
-          size="sm" 
-          onClick={goBack}
-          className="flex items-center gap-2"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back
-        </Button>
         <div className="flex-1">
           <Header
             pageTitle={`Faucets on ${network?.name || "Unknown Network"}`}
@@ -831,7 +730,6 @@ const loadAllFaucetsMetadata = useCallback(async () => {
         </div>
       </div>
 
-      {/* Search and Filter Controls */}
       <SearchAndFilterControls
         searchTerm={searchTerm}
         setSearchTerm={setSearchTerm}
@@ -843,7 +741,6 @@ const loadAllFaucetsMetadata = useCallback(async () => {
         hasActiveFilters={hasActiveFilters}
       />
 
-      {/* Conditional Rendering based on state */}
       {isLoading ? (
         <div className="flex justify-center items-center py-8 sm:py-10 md:py-12">
           <div className="text-center">
@@ -867,16 +764,13 @@ const loadAllFaucetsMetadata = useCallback(async () => {
               }
             </p>
             {allFaucetsMeta.length === 0 ? (
-              <Link href="/create">
+              <Link href="/faucet/create-faucet">
                 <Button className="h-8 sm:h-9 md:h-10 text-xs sm:text-sm md:text-base">
                   Create Faucet
                 </Button>
               </Link>
             ) : (
-              <Button 
-                onClick={handleClearFilters}
-                className="h-8 sm:h-9 md:h-10 text-xs sm:text-sm md:text-base"
-              >
+              <Button onClick={handleClearFilters} className="h-8 sm:h-9 md:h-10 text-xs sm:text-sm md:text-base">
                 Clear Filters
               </Button>
             )}
@@ -884,7 +778,6 @@ const loadAllFaucetsMetadata = useCallback(async () => {
         </Card>
       ) : (
         <>
-          {/* Results Summary */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 text-xs sm:text-sm text-muted-foreground">
             <span>
               Showing {filteredAndSortedMeta.length} of {allFaucetsMeta.length} faucets on {network?.name || "Unknown Network"}
@@ -893,12 +786,7 @@ const loadAllFaucetsMetadata = useCallback(async () => {
             {hasActiveFilters && (
               <div className="flex items-center gap-2">
                 <span className="text-primary font-medium">Filters applied</span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleClearFilters}
-                  className="h-6 text-xs px-2"
-                >
+                <Button variant="ghost" size="sm" onClick={handleClearFilters} className="h-6 text-xs px-2">
                   Clear all
                 </Button>
               </div>
@@ -906,7 +794,6 @@ const loadAllFaucetsMetadata = useCallback(async () => {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 md:gap-6">
-            {/* Render the details of the CURRENT PAGE ONLY */}
             {faucetsToRender.map((faucet) => (
               <FaucetCard
                 key={`${faucet.faucetAddress}-${network?.chainId || chainId}`}
@@ -924,8 +811,7 @@ const loadAllFaucetsMetadata = useCallback(async () => {
               </div>
               <div className="flex items-center gap-1 sm:gap-2 flex-wrap justify-center">
                 <Button
-                  variant="outline"
-                  size="sm"
+                  variant="outline" size="sm"
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
                   disabled={page === 1 || isLoading}
                   className="h-8 sm:h-9 md:h-10 text-xs sm:text-sm md:text-base px-2 sm:px-3"
@@ -934,8 +820,7 @@ const loadAllFaucetsMetadata = useCallback(async () => {
                 </Button>
                 {getPageButtons()}
                 <Button
-                  variant="outline"
-                  size="sm"
+                  variant="outline" size="sm"
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                   disabled={page === totalPages || isLoading}
                   className="h-8 sm:h-9 md:h-10 text-xs sm:text-sm md:text-base px-2 sm:px-3"

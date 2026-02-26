@@ -19,7 +19,7 @@ import { ZeroAddress, isAddress as ethersIsAddress } from 'ethers'
 import { type Network } from "@/lib/faucet"
 
 // ==== CONFIG ====
-const API_BASE_URL = "https://fauctdrop-backend.onrender.com";
+const API_BASE_URL = "https://fauctdrop-backend.onrender.com"
 const MIN_POOL_USD_VALUE = 50; // $50 Minimum
 
 const networks: Network[] = [
@@ -42,7 +42,16 @@ const networks: Network[] = [
         name: "Base", symbol: "BASE", chainId: BigInt(8453), rpcUrl: "https://base.publicnode.com", blockExplorer: "https://basescan.org", explorerUrl: "https://basescan.org", color: "#0052FF", logoUrl: "/base.png", iconUrl: "/base.png",
         factoryAddresses: ["0x587b840140321DD8002111282748acAdaa8fA206"],
         factories: { custom: "0x587b840140321DD8002111282748acAdaa8fA206" }, tokenAddress: ZeroAddress, nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }, isTestnet: false,
-    }
+    },
+    {
+    name: "Bnb", symbol: "BNB", chainId: BigInt(56), rpcUrl: "https://binance.llamarpc.com", blockExplorer: "https://bscscan.com", explorerUrl: "https://bscscan.com", color: "#F3BA2F", 
+    logoUrl: "/bnb.svg", iconUrl: "/bnb.svg", factoryAddresses: ["0x587b840140321DD8002111282748acAdaa8fA206"], factories: { custom: "0x587b840140321DD8002111282748acAdaa8fA206" },    tokenAddress: ZeroAddress, nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },  isTestnet: false,
+},
+{
+    name: "Avalanche", symbol: "AVAX", chainId: BigInt(43114), rpcUrl: "https://api.avax.network/ext/bc/C/rpc", blockExplorer: "https://snowtrace.io", explorerUrl: "https://snowtrace.io", color: "#E84142",
+    logoUrl: "/avax.svg", iconUrl: "/avax.svg", factoryAddresses: [""], factories: { custom: "" },    tokenAddress: ZeroAddress, nativeCurrency: { name: "AVAX", symbol: "AVAX", decimals: 18 },  isTestnet: false,
+}
+
 ]
 
 const ALL_TOKENS_BY_CHAIN: Record<number, TokenConfiguration[]> = {
@@ -63,7 +72,48 @@ const ALL_TOKENS_BY_CHAIN: Record<number, TokenConfiguration[]> = {
     8453: [
         { address: ZeroAddress, name: "Ethereum", symbol: "ETH", decimals: 18, isNative: true, logoUrl: "/ether.jpeg", description: "Native Ethereum" },
         { address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", name: "USD Coin", symbol: "USDC", decimals: 6, logoUrl: "/usdc.jpg", description: "Native USD Coin" },
-    ]
+    ],
+    56:[
+        { address: ZeroAddress, name: "BNB", symbol: "BNB", decimals: 18, isNative: true, logoUrl: "/bnb.png", description: "Native BNB for transaction fees" },
+        { address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", name: "USD Coin", symbol: "USDC", decimals: 18, logoUrl: "/usdc.jpg", description: "Binance-Peg USD Coin" },
+        { address: "0x55d398326f99059fF775485246999027B3197955", name: "Tether USD", symbol: "USDT", decimals: 18, logoUrl: "/usdt.jpg", description: "Binance-Peg BSC-USD" },
+        { address: "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56", name: "BUSD", symbol: "BUSD", decimals: 18, logoUrl: "/busd.png", description: "Binance-Peg BUSD Token" },
+    ],
+    43114: [
+        {
+          address: ZeroAddress,
+          name: "Avalanche",
+          symbol: "AVAX",
+          decimals: 18,
+          isNative: true,
+          logoUrl: "/avax.svg", 
+          description: "Native Avalanche for transaction fees",
+        },
+        {
+          address: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+          name: "USD Coin",
+          symbol: "USDC",
+          decimals: 6,
+          logoUrl: "/usdc.jpg", 
+          description: "USD Coin on Avalanche",
+        },
+        {
+          address: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+          name: "Tether USD",
+          symbol: "USDT",
+          decimals: 6,
+          logoUrl: "/usdt.jpg",
+          description: "Tether USD on Avalanche",
+        },
+        {
+          address: "0xdD8bC0b33ca3EA16CA2C7eBf971B8a92A3B2F306",
+          name: "Agora",
+          symbol: "AGR",
+          decimals: 18,
+          logoUrl: "/ago.png", 
+          description: "Agora community token on Avalanche",
+        }
+      ],
 }
 
 // Map tokens to CoinGecko IDs for price fetching
@@ -73,7 +123,8 @@ const COINGECKO_IDS: Record<string, string> = {
     "USDT": "tether",
     "USDC": "usd-coin",
     "ETH": "ethereum",
-    "LSK": "lisk"
+    "LSK": "lisk",
+    "BNB": "bnb"
 }
 
 export interface TokenConfiguration {
@@ -101,6 +152,8 @@ export interface QuestData {
     faucetAddress?: string
     rewardTokenType?: 'native' | 'erc20'
     tokenAddress?: string
+    tokenSymbol?: string
+    tasks: any[]
 }
 
 // ==== UTILS ====
@@ -125,16 +178,19 @@ const ImageUploadField: React.FC<{
     requiredResolution?: { width: number; height: number }
 }> = ({ imageUrl, onImageUrlChange, onFileUpload, isUploading, uploadError, requiredResolution }) => {
     const fileInputRef = useRef<HTMLInputElement>(null)
-    const [previewUrl, setPreviewUrl] = useState(imageUrl)
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null)
     const [resolutionError, setResolutionError] = useState<string | null>(null)
-    const maxWidth = requiredResolution?.width || 1280
-    const maxHeight = requiredResolution?.height || 1280
+    
+    const maxWidth = requiredResolution?.width || 1024
+    const maxHeight = requiredResolution?.height || 1024
 
-    useEffect(() => setPreviewUrl(imageUrl), [imageUrl])
+    // Use a helper to check if the current image is just a placeholder
+    const isPlaceholder = !imageUrl || imageUrl.includes('placehold.co');
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
         if (!file) return
+        
         setResolutionError(null)
 
         const reader = new FileReader()
@@ -143,7 +199,6 @@ const ImageUploadField: React.FC<{
             img.onload = () => {
                 if (img.width > maxWidth || img.height > maxHeight) {
                     setResolutionError(`Image too large. Max: ${maxWidth}x${maxHeight}. Found: ${img.width}x${img.height}`)
-                    setPreviewUrl(null)
                     if (fileInputRef.current) fileInputRef.current.value = ""
                     return
                 }
@@ -156,33 +211,85 @@ const ImageUploadField: React.FC<{
     }
 
     const handleRemove = () => {
-        onImageUrlChange("")
-        setPreviewUrl(null)
+        onImageUrlChange("") // Clear parent state
+        setPreviewUrl(null)   // Clear local preview
         setResolutionError(null)
         if (fileInputRef.current) fileInputRef.current.value = ""
     }
 
-    const displayUrl = imageUrl || previewUrl
+    // Only show the preview section if there's a real image or an error
+    const shouldShowPreview = (!isPlaceholder) || previewUrl || uploadError || resolutionError;
 
     return (
         <div className="space-y-2">
-            <Label>Quest Image/Logo (Max 5MB, ≤{maxWidth}x{maxHeight})</Label>
+            <Label>Quest Image/Logo (Max 5MB, Recommended: {maxWidth}x{maxHeight} Square)</Label>
+            
             <div className="flex items-center space-x-3">
-                <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isUploading || !!resolutionError} className="flex-grow">
-                    {isUploading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
-                    {isUploading ? "Uploading..." : imageUrl ? "Change" : "Upload"}
+                {/* The Button is now always visible and toggle-able */}
+                <Button 
+                    type="button" 
+                    variant="outline" 
+                    onClick={() => fileInputRef.current?.click()} 
+                    disabled={isUploading} 
+                    className="flex-grow"
+                >
+                    {isUploading ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                        <Upload className="h-4 w-4 mr-2" />
+                    )}
+                    {isUploading ? "Uploading..." : (!isPlaceholder ? "Change Image" : "Upload Image")}
                 </Button>
-                {imageUrl && <Button type="button" variant="destructive" size="icon" onClick={handleRemove} disabled={isUploading}><Trash2 className="h-4 w-4" /></Button>}
-                <Input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} disabled={isUploading} />
+
+                {!isPlaceholder && (
+                    <Button 
+                        type="button" 
+                        variant="destructive" 
+                        size="icon" 
+                        onClick={handleRemove} 
+                        disabled={isUploading}
+                    >
+                        <Trash2 className="h-4 w-4" />
+                    </Button>
+                )}
+
+                <Input 
+                    ref={fileInputRef} 
+                    type="file" 
+                    accept="image/*" 
+                    className="hidden" 
+                    onChange={handleFileChange} 
+                />
             </div>
-            {(displayUrl || uploadError || resolutionError) && (
-                <div className="flex items-start space-x-3 mt-2 border p-3 rounded-lg bg-white dark:bg-gray-800">
-                    <div className="h-16 w-16 rounded-lg overflow-hidden border bg-gray-100 dark:bg-gray-700">
-                        {displayUrl ? <img src={displayUrl} alt="Preview" className="h-full w-full object-contain" /> : <div className="h-full w-full flex items-center justify-center text-xs text-muted-foreground">No Img</div>}
+
+            {shouldShowPreview && (
+                <div className="flex items-start space-x-3 mt-2 border p-3 rounded-lg bg-slate-50 dark:bg-gray-800 animate-in fade-in zoom-in duration-200">
+                    <div className="h-16 w-16 rounded-lg overflow-hidden border bg-gray-100 dark:bg-gray-700 flex-shrink-0">
+                        {(previewUrl || !isPlaceholder) ? (
+                            <img 
+                                src={previewUrl || imageUrl} 
+                                alt="Preview" 
+                                className="h-full w-full object-cover" 
+                            />
+                        ) : (
+                            <div className="h-full w-full flex items-center justify-center text-[10px] text-muted-foreground text-center p-1">
+                                No Image
+                            </div>
+                        )}
                     </div>
-                    <div>
-                        {(uploadError || resolutionError) && <p className="text-xs text-red-500"><AlertTriangle className="h-3 w-3 inline mr-1" />{resolutionError || uploadError}</p>}
-                        {(!uploadError && !resolutionError && imageUrl) && <p className="text-xs text-green-500"><Check className="h-3 w-3 inline mr-1" />Uploaded successfully</p>}
+                    
+                    <div className="flex-grow pt-1">
+                        {resolutionError || uploadError ? (
+                            <p className="text-xs text-red-500 font-medium flex items-center gap-1">
+                                <AlertTriangle className="h-3.5 w-3.5" />
+                                {resolutionError || uploadError}
+                            </p>
+                        ) : !isPlaceholder ? (
+                            <p className="text-xs text-green-600 font-medium flex items-center gap-1">
+                                <Check className="h-3.5 w-3.5" />
+                                Ready for quest
+                            </p>
+                        ) : null}
                     </div>
                 </div>
             )}
@@ -279,7 +386,7 @@ export default function Phase1QuestDetailsRewards<T extends QuestData>({
             return acc + count * tier.amountPerUser
         }, 0)
     }
-
+    
     // Calculate USD Value & Min Amount
     const poolAmount = newQuest.distributionConfig.model === 'custom_tiers' 
         ? calculateTotalFromTiers()
@@ -334,7 +441,14 @@ export default function Phase1QuestDetailsRewards<T extends QuestData>({
         if (!total || total <= 0) return '0';
         return (total / winners).toFixed(6);
     }
-
+    const isPhase1Valid = useMemo(() => {
+    const hasValidTitle = (newQuest.title || "").trim().length >= 3 && !nameError;
+    const hasImage = !!newQuest.imageUrl && !newQuest.imageUrl.includes('placehold.co');
+    const hasToken = !!selectedToken;
+    const hasValidPool = poolAmount > 0 && !isBelowMin;
+    
+    return hasValidTitle && hasImage && hasToken && hasValidPool && isConnected;
+}, [newQuest.title, nameError, newQuest.imageUrl, selectedToken, poolAmount, isBelowMin, isConnected]);
     const handleTierChange = (index: number, field: 'rankStart' | 'rankEnd' | 'amountPerUser', value: number) => {
         const updated = [...newQuest.distributionConfig.tiers]
         updated[index] = { ...updated[index], [field]: value }
@@ -389,18 +503,20 @@ export default function Phase1QuestDetailsRewards<T extends QuestData>({
         try {
             const draftId = newQuest.faucetAddress || `draft-${crypto.randomUUID()}`
 
-            const payload = {
-                creatorAddress: address,
-                title: newQuest.title.trim(),
-                description: newQuest.description,
-                imageUrl: newQuest.imageUrl,
-                rewardPool: poolAmount.toString(), // Ensure we send the correct calculated pool for custom tiers
-                rewardTokenType: selectedToken.isNative ? 'native' : 'erc20',
-                tokenAddress: selectedToken.address,
-                distributionConfig: newQuest.distributionConfig,
-                faucetAddress: draftId 
-            }
-
+         const payload = {
+            creatorAddress: address,
+            title: newQuest.title.trim(),
+            description: newQuest.description,
+            imageUrl: newQuest.imageUrl,
+            rewardPool: poolAmount.toString(),
+            rewardTokenType: selectedToken.isNative ? 'native' : 'erc20',
+            tokenAddress: selectedToken.address,
+            tokenSymbol: selectedToken.symbol,           // ← ADD THIS
+            token_symbol: selectedToken.symbol,
+            distributionConfig: newQuest.distributionConfig,
+            faucetAddress: draftId,
+            tasks: newQuest.tasks
+        };
             const res = await fetch(`${API_BASE_URL}/api/quests/draft`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -433,7 +549,7 @@ export default function Phase1QuestDetailsRewards<T extends QuestData>({
                                 value={titleSafe}
                                 onChange={(e) => handleTitleChange(e.target.value)}
                                 onBlur={handleTitleBlur}
-                                placeholder="e.g. FaucetDrop Launch Campaign"
+                                placeholder="e.g. FaucetDrops Launch Campaign"
                                 className={nameError ? "border-red-500 pr-10" : (!isCheckingName && titleLength >= 3 && !nameError) ? "border-green-500 pr-10" : "pr-10"}
                                 disabled={isCheckingName}
                             />
@@ -451,7 +567,7 @@ export default function Phase1QuestDetailsRewards<T extends QuestData>({
                         onFileUpload={handleImageUpload}
                         isUploading={isUploadingImage}
                         uploadError={uploadImageError}
-                        requiredResolution={{ width: 1280, height: 1280 }}
+                        requiredResolution={{ width: 1024, height: 1024 }}
                     />
 
                     <div className="space-y-2">
@@ -497,7 +613,8 @@ export default function Phase1QuestDetailsRewards<T extends QuestData>({
                                     setNewQuest(prev => ({
                                         ...prev,
                                         rewardTokenType: token.isNative ? 'native' : 'erc20',
-                                        tokenAddress: token.address
+                                        tokenAddress: token.address,
+                                        tokenSymbol: token.symbol
                                     } as T))
                                 }
                             }
@@ -517,8 +634,21 @@ export default function Phase1QuestDetailsRewards<T extends QuestData>({
                                 <Input value={customTokenAddress} onChange={(e) => setCustomTokenAddress(e.target.value)} placeholder="0x..." />
                                 <Button variant="secondary" onClick={() => {
                                     if (isAddress(customTokenAddress)) {
-                                        setSelectedToken({ address: customTokenAddress, name: 'Custom', symbol: 'TOK', decimals: 18 })
-                                        setNewQuest(prev => ({ ...prev, rewardTokenType: 'erc20', tokenAddress: customTokenAddress } as T))
+                                        // ✅ FIX: Create token with symbol
+                                        const customToken = { 
+                                            address: customTokenAddress, 
+                                            name: 'Custom', 
+                                            symbol: 'TOK',  // You might want to fetch this
+                                            decimals: 18 
+                                        }
+                                        
+                                        setSelectedToken(customToken)
+                                        setNewQuest(prev => ({ 
+                                            ...prev, 
+                                            rewardTokenType: 'erc20', 
+                                            tokenAddress: customTokenAddress,
+                                            tokenSymbol: 'TOK'  // ← ADD THIS
+                                        } as T))
                                         toast.success("Custom token address set")
                                     } else {
                                         toast.error("Invalid token address")
@@ -551,7 +681,7 @@ export default function Phase1QuestDetailsRewards<T extends QuestData>({
                                     <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="equal">Equal</SelectItem>
-                                        <SelectItem value="quadratic">Quadratic</SelectItem>
+                                        {/* <SelectItem value="quadratic">Quadratic</SelectItem> */}
                                         <SelectItem value="custom_tiers">Custom Tiers</SelectItem>
                                     </SelectContent>
                                 </Select>
@@ -682,7 +812,12 @@ export default function Phase1QuestDetailsRewards<T extends QuestData>({
                         )}
                     </div>
                     <div className="pt-8 border-t text-center">
-                        <Button size="lg" onClick={handleSaveDraft} disabled={isSavingDraft || isBelowMin} className="w-full sm:w-auto">
+                        <Button 
+                            size="lg" 
+                            onClick={handleSaveDraft} 
+                            disabled={isSavingDraft || !isPhase1Valid} 
+                            className="w-full sm:w-auto"
+                        >
                             {isSavingDraft ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Save className="mr-2 h-5 w-5" />}
                             Save and Continue
                         </Button>

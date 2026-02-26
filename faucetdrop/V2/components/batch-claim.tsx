@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useWallet } from "@/hooks/use-wallet"
-import { useToast } from "@/hooks/use-toast"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
@@ -17,7 +17,7 @@ interface BatchclaimProps {
 
 // Update the Batchdropcomponent to include network checking
 export function Batchclaim({ faucetAddress }: BatchclaimProps) {
-  const { toast } = useToast()
+  
   const { address, ensureCorrectNetwork } = useWallet()
   const { network } = useNetwork()
   const [addresses, setAddresses] = useState("")
@@ -26,11 +26,7 @@ export function Batchclaim({ faucetAddress }: BatchclaimProps) {
   const Provider = NetworkProvider // Ensure Provider is correctly imported or defined
   const handleBatchclaim= async () => {
     if (!address) {
-      toast({
-        title: "Wallet not connected",
-        description: "Please connect your wallet to process batch claims",
-        variant: "destructive",
-      })
+      toast.error("Please connect your wallet before proceeding.")
       return
     }
 
@@ -46,10 +42,8 @@ export function Batchclaim({ faucetAddress }: BatchclaimProps) {
       .filter((addr) => addr.length > 0 && addr.startsWith("0x"))
 
     if (addressList.length === 0) {
-      toast({
-        title: "No valid addresses",
+      toast.error("No valid addresses", {
         description: "Please enter at least one valid Ethereum address",
-        variant: "destructive",
       })
       return
     }
@@ -70,18 +64,10 @@ export function Batchclaim({ faucetAddress }: BatchclaimProps) {
         }
       }
 
-      toast({
-        title: "Batch drop processed",
-        description: `Successfully  droped for ${successCount} addresses. Failed: ${failCount}`,
-        variant: successCount > 0 ? "default" : "destructive",
-      })
+      toast.success(`Successfully claimed for ${successCount} addresses. Failed: ${failCount}`)
     } catch (error) {
-      console.error("Error in batch  drop:", error)
-      toast({
-        title: "Batch drop failed",
-        description: error instanceof Error ? error.message : "Unknown error occurred",
-        variant: "destructive",
-      })
+      console.error("Error in batch drop:", error)
+      toast.error("Batch drop failed. Please try again later.")
     } finally {
       setIsProcessing(false)
     }

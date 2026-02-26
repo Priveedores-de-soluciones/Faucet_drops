@@ -14,98 +14,88 @@ export function Faq() {
       defaultValue="item-1"
     >
       <AccordionItem value="item-1">
-        <AccordionTrigger>How do I start a quest?</AccordionTrigger>
-        <AccordionContent className="flex flex-col gap-4 text-balance">
+        <AccordionTrigger className="text-xl">How do I start a quest?</AccordionTrigger>
+        <AccordionContent className="flex flex-col gap-4 text-lg">
           <p>
-            Browse active quests, click &quot;Start Quest&quot;, and begin
-            completing tasks. Track your progress on the quest page.
+            Browse active quests, click into one, and begin completing the tasks listed in the Beginner stage. Your progress is tracked in real-time on the quest page.
           </p>
         </AccordionContent>
       </AccordionItem>
       <AccordionItem value="item-2">
-        <AccordionTrigger>
-          Can I participate in multiple quests?{" "}
+        <AccordionTrigger className="text-xl">
+          What does Strict Progression Mode mean?
         </AccordionTrigger>
-        <AccordionContent className="flex flex-col gap-4 text-balance">
-          <p>Yes! Participate in as many quests as you like simultaneously.</p>
+        <AccordionContent className="flex flex-col gap-4 text-lg">
+          <p>
+            When enabled, you must reach the pass requirement (70% of stage points) before unlocking the next stage. Not all quests use this mode.
+          </p>
         </AccordionContent>
       </AccordionItem>
       <AccordionItem value="item-3">
-        <AccordionTrigger>How are points calculated?</AccordionTrigger>
-        <AccordionContent className="flex flex-col gap-4 text-balance">
+        <AccordionTrigger className="text-xl">
+          Can I participate in multiple quests simultaneously?
+        </AccordionTrigger>
+        <AccordionContent className="flex flex-col gap-4 text-lg">
           <p>
-            Each task has a predetermined point value based on difficulty and
-            type. Points are awarded immediately upon task verification.
+            Yes. You can join and progress through multiple active quests at the same time, as long as each campaign&apos;s individual eligibility requirements are met.
           </p>
         </AccordionContent>
       </AccordionItem>
       <AccordionItem value="item-4">
-        <AccordionTrigger>
-          How long do I have to claim rewards?
-        </AccordionTrigger>
-        <AccordionContent className="flex flex-col gap-4 text-balance">
+        <AccordionTrigger className="text-xl">How are points calculated?</AccordionTrigger>
+        <AccordionContent className="flex flex-col gap-4 text-lg">
           <p>
-            Claim windows are typically 30 days from the winner&apos;s
-            announcement. Check specific quest details.
+            Each task has a fixed point value set by the quest creator. Points are awarded after your submission is verified. Your total points determine your position and reward allocation.
           </p>
         </AccordionContent>
       </AccordionItem>
       <AccordionItem value="item-5">
-        <AccordionTrigger>
-          What if I&apos;m not selected as a winner?
+        <AccordionTrigger className="text-xl">
+          How long do I have to claim rewards?
         </AccordionTrigger>
-        <AccordionContent className="flex flex-col gap-4 text-balance">
+        <AccordionContent className="flex flex-col gap-4 text-lg">
           <p>
-            Some quests offer threshold-based rewards where everyone who reaches
-            certain point totals receives tokens.
+            The default claim window is 168 hours (7 days) after the campaign ends. Each quest may specify a different window. Unclaimed rewards after this window may be forfeited.
           </p>
         </AccordionContent>
       </AccordionItem>
       <AccordionItem value="item-6">
-        <AccordionTrigger>Can I see who&apos;s winning?</AccordionTrigger>
-        <AccordionContent className="flex flex-col gap-4 text-balance">
+        <AccordionTrigger className="text-xl">
+          What distribution model will I be rewarded under?
+        </AccordionTrigger>
+        <AccordionContent className="flex flex-col gap-4 text-lg">
           <p>
-            Yes, leaderboards are updated in real-time during the quest period.
+            The model (Equal, Proportional, or Top Winners) is set by the creator and shown on the quest page before you start. It does not change after the campaign launches.
           </p>
         </AccordionContent>
       </AccordionItem>
       <AccordionItem value="item-7">
-        <AccordionTrigger>Are creative submissions reviewed?</AccordionTrigger>
-        <AccordionContent className="flex flex-col gap-4 text-balance">
+        <AccordionTrigger className="text-xl">
+          Are creative submissions manually reviewed?
+        </AccordionTrigger>
+        <AccordionContent className="flex flex-col gap-4 text-lg">
           <p>
-            Yes, submissions requiring creativity or originality are manually
-            reviewed by quest creators or FaucetDrops team.
+            Yes. Creative tasks typically require manual review by the quest creator or their team. Allow extra time for these tasks to be verified compared to automated social tasks.
           </p>
         </AccordionContent>
       </AccordionItem>
       <AccordionItem value="item-8">
-        <AccordionTrigger>
+        <AccordionTrigger className="text-xl">
           What happens if I&apos;m disqualified?
         </AccordionTrigger>
-        <AccordionContent className="flex flex-col gap-4 text-balance">
+        <AccordionContent className="flex flex-col gap-4 text-lg">
           <p>
-            Disqualified participants forfeit all points and rewards. Common
-            reasons: bots, multiple accounts, plagiarism, fake engagement.
+            Violations of the fair play policy, use of bots, or duplicate accounts result in disqualification. Your points will be voided and you will not receive rewards for that campaign.
           </p>
         </AccordionContent>
       </AccordionItem>
       <AccordionItem value="item-9">
-        <AccordionTrigger>How do referrals work?</AccordionTrigger>
-        <AccordionContent className="flex flex-col gap-4 text-balance">
-          <p>
-            Share your unique referral link. When someone joins using your link
-            and earns points, you receive bonus points.
-          </p>
-        </AccordionContent>
-      </AccordionItem>
-      <AccordionItem value="item-10">
-        <AccordionTrigger>
+        <AccordionTrigger className="text-xl">
           Can quest rules change mid-campaign?
         </AccordionTrigger>
-        <AccordionContent className="flex flex-col gap-4 text-balance">
+        <AccordionContent className="flex flex-col gap-4 text-lg">
           <p>
-            Minor clarifications may be added, but major changes (point values,
-            rewards) cannot be changed once the quest is live.
+            Core parameters (reward pool, token, distribution model, timeline) are locked at creation. Task-level adjustments may occur at the creator&apos;s discretion within platform guidelines.
           </p>
         </AccordionContent>
       </AccordionItem>

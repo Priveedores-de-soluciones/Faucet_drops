@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useNetwork } from "@/hooks/use-network";
-import { useToast } from "@/hooks/use-toast";
+import {toast} from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -216,6 +216,26 @@ const CHAIN_CONFIGS: Record<number, ChainConfig> = {
         symbol: "USDC",
         decimals: 6,
       },
+      {
+      address: "0xac485391EB2d7D88253a7F1eF18C37f4242D1A24",
+      name: "Lisk",
+      symbol: "LSK",
+      decimals: 18
+    },
+    {
+      address: "0x05D032ac25d322df992303dCa074EE7392C117b9",
+      name: "Tether USD",
+      symbol: "USDT",
+      decimals: 6,
+     
+    },
+    {
+      address: "0xF242275d3a6527d877f2c927a82D9b057609cc71",
+      name: "Bridged USDC",
+      symbol: "USDC.e",
+      decimals: 6,
+  
+    },
     ],
   },
   8453: {
@@ -273,15 +293,8 @@ async function getTokenInfo(
 ): Promise<{ symbol: string; decimals: number }> {
   const chainConfig = CHAIN_CONFIGS[chainId];
   
-  if (isEther) {
-    return {
-      symbol: chainConfig?.nativeCurrency.symbol || "ETH",
-      decimals: chainConfig?.nativeCurrency.decimals || 18
-    };
-  }
-
-  // Check if it's a known default token first
-  if (chainConfig?.defaultTokens) {
+  // 1. Check known default tokens FIRST (ensures LSK address is found even if isEther is toggled)
+  if (chainConfig?.defaultTokens && tokenAddress && tokenAddress !== ZeroAddress) {
     const knownToken = chainConfig.defaultTokens.find(
       token => token.address.toLowerCase() === tokenAddress.toLowerCase()
     );
@@ -293,24 +306,29 @@ async function getTokenInfo(
     }
   }
 
-  // Query the token contract
+  // 2. If it is truly native gas (no specific address or ZeroAddress)
+  if (isEther || !tokenAddress || tokenAddress === ZeroAddress) {
+    return {
+      symbol: chainConfig?.nativeCurrency.symbol || "ETH",
+      decimals: chainConfig?.nativeCurrency.decimals || 18
+    };
+  }
+
+  // 3. Final Fallback: Query the contract on-chain
   try {
     const tokenContract = new Contract(tokenAddress, ERC20_ABI, provider);
     const [symbol, decimals] = await Promise.all([
-      tokenContract.symbol(),
-      tokenContract.decimals()
+      tokenContract.symbol().catch(() => "TOKEN"),
+      tokenContract.decimals().catch(() => 18)
     ]);
     
     return {
-      symbol: symbol || "TOKEN",
+      symbol: symbol !== "TOKEN" ? symbol : "TOKEN",
       decimals: Number(decimals) || 18
     };
   } catch (error) {
     console.warn(`Error fetching token info for ${tokenAddress}:`, error);
-    return {
-      symbol: "TOKEN",
-      decimals: 18
-    };
+    return { symbol: "TOKEN", decimals: 18 };
   }
 }
 
@@ -370,8 +388,7 @@ async function getAllClaimsFromFactories(
         // Filter for claim transactions only
         const claimTransactions = allTransactions.filter((tx: any) => {
           const transactionType = tx.transactionType.toLowerCase();
-          return transactionType === 'claim' || 
-                 (transactionType.includes('claim') && !transactionType.includes('setclaimparameters'));
+          return transactionType === 'claim';
         });
         
         console.log(`Found ${claimTransactions.length} claim transactions from factory ${factoryAddress} (${factoryType})`);
@@ -513,7 +530,7 @@ function isCacheValid(): boolean {
 
 export function FaucetList() {
   const { networks } = useNetwork();
-  const { toast } = useToast();
+ 
   
   const [claims, setClaims] = useState<ClaimType[]>([]);
   const [loadingClaims, setLoadingClaims] = useState(true);
@@ -645,20 +662,13 @@ export function FaucetList() {
         await fetchFaucetNames(claimsData);
         
         if (forceRefresh) {
-          toast({
-            title: "Drops refreshed",
-            description: `Loaded ${claimsData.length} total drops from all factory types`,
-          });
+          toast.success("Drops refreshed successfully");
         }
       }
       
     } catch (error) {
       console.error("Error loading drops:", error);
-      toast({
-        title: "Failed to load drops",
-        description: error instanceof Error ? error.message : "Please try again later.",
-        variant: "destructive",
-      });
+      toast.error("Failed to load drops. Please try again later.");
     } finally {
       setLoadingClaims(false);
       setRefreshing(false);
@@ -772,7 +782,7 @@ export function FaucetList() {
             <div className="flex justify-center items-center py-10 sm:py-12">
               <div className="text-center">
                 <div className="animate-spin rounded-full h-10 w-10 sm:h-12 sm:w-12 border-b-2 border-primary mx-auto"></div>
-                <p className="mt-4 text-sm sm:text-base">Loading drops from multi-ABI factory contracts...</p>
+                <p className="mt-4 text-sm sm:text-base">Loading drops...</p>
               </div>
             </div>
           ) : claims.length === 0 ? (

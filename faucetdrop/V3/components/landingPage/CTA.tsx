@@ -1,6 +1,5 @@
 'use client'
 import React, { useState, useEffect } from 'react'
-import ScrollReveal from '@/components/ScrollReveal'
 import MagneticButton from '@/components/MagneticButton'
 import InfiniteDome from './InfiniteDome'
 import { useRouter } from 'next/navigation'
@@ -38,11 +37,9 @@ export default function CTA() {
       {/* <ScrollReveal direction='down' delay={200}>
         <div className="w-full h-[400px] bg-[url('/banner.png')] bg-cover bg-center rounded-4xl"></div>
       </ScrollReveal> */}
-      <ScrollReveal direction="up" delay={200}>
         <h2 className="text-3xl md:text-4xl font-bold leading-tight tracking-[-0.015em] px-4 py-15 text-center text-white">
           Ready to build your web3 growth engine?
         </h2>
-      </ScrollReveal>
 
       <div style={{ height: '600px', position: 'relative' }} className='-mt-32 max-sm:-mt-20 w-full' data-aos="fade-up" data-aos-delay="1300">
         <InfiniteDome
@@ -54,7 +51,6 @@ export default function CTA() {
         />
       </div>
 
-      <ScrollReveal direction="up" delay={400}>
         <div className="flex flex-col sm:flex-row items-center justify-center space-y-4 sm:space-y-0 sm:space-x-6">
           <MagneticButton
             onClick={handleLaunch}
@@ -69,7 +65,6 @@ export default function CTA() {
             Talk to Our Team
           </MagneticButton>
         </div>
-      </ScrollReveal>
     </section>
   )
 }

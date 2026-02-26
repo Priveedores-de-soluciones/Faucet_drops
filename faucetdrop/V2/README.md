@@ -230,10 +230,10 @@ Love what we're building? Here's how you can help:
 
 ## 📞 Support & Community
 
-* **Twitter/X** — Follow updates [@faucetdrops](https://x.com/faucetdrops)
-* **Telegram** — Chat with the team [link](https://t.me/faucetdropschat)
+* **Twitter/X** — Follow updates [@FaucetDrops](https://x.com/FaucetDrops)
+* **Telegram** — Chat with the team [link](https://t.me/FaucetDropschat)
 * **Email** — Contact us: drops.faucet@gmail.com
-* **Docs** — Full technical docs [link](faucetdrops.io/docs)
+* **Docs** — Full technical docs [link](FaucetDrops.io/docs)
 
 ---
 
@@ -247,5 +247,5 @@ Built by Priveedores-de-soluciones team, powered by:
 ---
 
 **Ready to transform community engagement onchain?**  
-[Get Started](https://faucetdrops.io) | [View Docs](https://faucetdrops.io/docs) | [Join Community](https://t.me/faucetdropschat)
+[Get Started](https://FaucetDrops.io) | [View Docs](https://FaucetDrops.io/docs) | [Join Community](https://t.me/FaucetDropschat)
 

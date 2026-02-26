@@ -3,22 +3,50 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { WalletConnectButton } from "@/components/wallet-connect";
-import { NetworkSelector } from "@/components/network-selector";
+import { NetworkSelector, MiniNetworkIndicator } from "@/components/network-selector";
 import Link from "next/link";
-import { ArrowBigLeft, ArrowLeft, Menu, X } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { Plus } from "lucide-react";
-import { JoinDroplistButton } from "./droplist";
+import { Menu, X, ChevronLeft, Plus } from "lucide-react";
+import { useRouter, usePathname } from "next/navigation";
+import { useWallet } from "@/hooks/use-wallet";
+import Image from "next/image"; // Added Image import
+import { cn } from "@/lib/utils";
+import { ThemeToggle } from "./theme";
 
-export function Header({ pageTitle }: { pageTitle: string }) {
+export function Header({ 
+  pageTitle, 
+  hideAction = false 
+}: { 
+  pageTitle: string; 
+  hideAction?: boolean; 
+}) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const router = useRouter();
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
-  // Close menu on outside click
+  const router = useRouter();
+  const pathname = usePathname();
+  const { isConnected } = useWallet();
+
+  const getActionConfig = () => {
+    if (pathname.includes('/quest')) {
+      return { label: "Create Quest", path: "/quest/create-quest" };
+    }
+    if (pathname.includes('/quiz')) {
+      return { label: "Create Quiz", path: "/quiz/create-quiz" };
+    }
+    return { label: "Create Faucet", path: "/faucet/create-faucet" };
+  };
+
+  const action = getActionConfig();
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+      if (
+        menuRef.current && 
+        !menuRef.current.contains(event.target as Node) &&
+        buttonRef.current &&
+        !buttonRef.current.contains(event.target as Node)
+      ) {
         setIsMenuOpen(false);
       }
     }
@@ -27,66 +55,99 @@ export function Header({ pageTitle }: { pageTitle: string }) {
   }, []);
 
   return (
-    <header className="flex items-center justify-between px-4 sm:px-6 py-4 sm:py-6 bg-background">
-     
-      <h1 className="text-base sm:text-lg font-semibold" title="Go Back Home"><Link href="/">{pageTitle}</Link></h1>
-    
-      {/* Mobile Toggle Button */}
-      <div className="sm:hidden">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="p-1 ml-auto"
-          onClick={() => setIsMenuOpen(!isMenuOpen)}
-          aria-label={isMenuOpen ? "Close menu" : "Open menu"}
-          aria-expanded={isMenuOpen}
-        >
-          {isMenuOpen ? (
-            <X className="h-4 w-4 sm:h-5 sm:w-5" />
-          ) : (
-            <Menu className="h-4 w-4 sm:h-5 sm:w-5" />
-          )}
-        </Button>
-      </div>
-
-      {/* Mobile Menu */}
-      <div
-        ref={menuRef}
-        className={`${isMenuOpen ? "block" : "hidden"
-          } sm:hidden absolute top-14 sm:top-16 right-4 bg-background border rounded-lg shadow-lg p-4 w-48 z-50`}
-      >
-        <div className="flex flex-col gap-2">
-          <NetworkSelector />
+    <>
+      <header className="fixed top-0 left-0 right-0 z-[100] w-full bg-background/80 backdrop-blur-md border-b border-border px-4 sm:px-10 h-20">
+        <div className="max-w-[1400px] mx-auto h-full flex items-center justify-between">
           
-          <JoinDroplistButton/>
-          <WalletConnectButton />
-          <Button
-            onClick={() => router.push('/')}
-            size="sm"
-            className="w-full flex items-center justify-center gap-2"
+          {/* Left Section */}
+          <div className="flex items-center gap-4">       
+            <div className="h-6 w-px bg-border hidden sm:block" />
+            
+            <Button
+            variant="outline"
+            size="icon"
+            onClick={() => router.back()}
+            // Removed 'hidden sm:flex' and added 'flex'
+            className=" rounded-full text-gray-400 hover:text-white transition-colors" 
+            title="Go Back"
           >
-            <ArrowLeft className="h-4 w-4" />
-            <span>Back to Home</span>
+            <ChevronLeft className="h-5 w-5" />
           </Button>
-        </div>
-      </div>
+           
+            <h1 className="text-sm sm:text-base font-black tracking-tighter uppercase text-foreground/90">
+                <Link href="/" className="hover:text-blue-500 transition-colors">
+                {pageTitle}
+              </Link>
+            </h1>
+          </div>
+        
+          {/* Desktop Actions */}
+          <div className="hidden lg:flex items-center gap-4">
+            <ThemeToggle/>
+            {isConnected && (
+              <>
+                <NetworkSelector />
+                {!hideAction && (
+                  <Button
+                      onClick={() => router.push(action.path)}
+                      variant="default"
+                      className="text-xs font-bold uppercase tracking-widest px-6 shadow-md hover:scale-105 transition-transform"
+                  >
+                      <Plus className="mr-2 h-4 w-4" />
+                      {action.label}
+                  </Button>
+                )}
+              </>
+            )}
+            <div className="border-l border-border pl-4">
+               <WalletConnectButton />
+            </div>
+          </div>
 
-      {/* Desktop Actions */}
-      <div className="hidden sm:flex items-center gap-2 sm:gap-3">
-        <NetworkSelector />
-        
-        
-        <JoinDroplistButton/>
-        <WalletConnectButton />
-        <Button
-          onClick={() => router.push('/')}
-          size="sm"
-          className="w-full flex items-center justify-center gap-2"
-        >
-           <ArrowLeft className="h-4 w-4" />
-          <span>Back to Home</span>
-        </Button>
-      </div>
-    </header>
+          {/* Mobile Actions */}
+          <div className="lg:hidden flex items-center gap-2 sm:gap-3">
+            <ThemeToggle/>
+            <WalletConnectButton />
+
+            {isConnected && (
+              <MiniNetworkIndicator className="h-9 w-9 border border-border rounded-md" />
+            )}
+            <Button
+              ref={buttonRef}
+              variant="outline"
+              size="sm"
+              className="px-2 border-border shadow-sm"
+              onClick={() => setIsMenuOpen(!isMenuOpen)}
+            >
+              {isMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </Button>
+          </div>
+        </div>
+
+        {/* Mobile Menu Overlay */}
+        {isMenuOpen && (
+          <div
+            ref={menuRef}
+            className="lg:hidden absolute top-[79px] left-0 w-full bg-background border-b border-border p-6 flex flex-col gap-4 shadow-xl animate-in fade-in slide-in-from-top-2 duration-200"
+          >
+            {isConnected && !hideAction && (
+              <Button
+                onClick={() => {
+                  router.push(action.path);
+                  setIsMenuOpen(false);
+                }}
+                variant="default"
+                className="w-full text-xs font-bold uppercase tracking-widest py-6"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                {action.label}
+              </Button>
+            )}
+          </div>
+        )}
+      </header>
+      
+      <div className="h-20" />
+    </>
   );
 }

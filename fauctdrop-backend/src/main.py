@@ -1,34 +1,46 @@
 from __future__ import annotations
 import shortuuid
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
+from fastapi import FastAPI, HTTPException, Request, Form, File, UploadFile, Depends, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse, JSONResponse, HTMLResponse
 from fastapi import UploadFile, File, Depends
 from pydantic import BaseModel, Field, ConfigDict
 from web3 import Web3
-from typing import Optional
+from typing import List, Optional, Literal, Dict, Any, Tuple
 from typing import Union
 from datetime import datetime, timedelta, timezone
+import re
+import hmac
+import hashlib
+from starlette.middleware.sessions import SessionMiddleware
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 # FIX: Use Web3's constants for ADDRESS_ZERO
 from web3.constants import ADDRESS_ZERO as ZeroAddress
-from typing import Dict, Tuple, List, Optional, Any
+from web3.middleware import ExtraDataToPOAMiddleware
+from enum import Enum
+from alchemy import Alchemy, Network
 from eth_account import Account
 from web3.types import TxReceipt
 from web3.exceptions import ContractLogicError
 import sys
+import shutil
 import os
 import asyncio
 import secrets
 import json
-from datetime import datetime, timedelta
+from playwright.async_api import async_playwright
+import playwright_stealth
+import random
+from datetime import datetime, timezone, timedelta
+import dateutil.parser
 from supabase import create_client, Client
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, distinct, text # Needed for DB interaction
 from sqlalchemy import Column, TEXT, BOOLEAN, DATE, TIMESTAMP, text # Import required DB elements
 from sqlalchemy.ext.declarative import declarative_base # Import the base for ORM models
 from eth_account.messages import encode_defunct
-# ... other imports ...
+import httpx
 import traceback # Added for better error logging
 import logging
+from dotenv import load_dotenv
 # Add parent directory to sys.path for config import
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 # Assuming 'config.py' exists and contains PRIVATE_KEY and get_rpc_url
@@ -62,6 +74,32 @@ from decimal import Decimal
 import uuid
 import logging
 import traceback # Added for better error logging
+
+
+from authlib.integrations.starlette_client import OAuth
+from starlette.config import Config
+import httpx
+from fastapi import Request, BackgroundTasks
+load_dotenv()
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+
+config = Config(environ=os.environ)
+oauth = OAuth(config)
+
+oauth.register(
+    name='discord',
+    client_id=config("DISCORD_CLIENT_ID"),
+    client_secret=config("DISCORD_CLIENT_SECRET"),
+    authorize_url='https://discord.com/api/oauth2/authorize',
+    access_token_url='https://discord.com/api/oauth2/token',
+    api_base_url='https://discord.com/api/',
+    client_kwargs={'scope': 'identify guilds guilds.members.read'}
+)
+
+
+auth_router = APIRouter(prefix="/auth", tags=["auth"])
+
 app = FastAPI(title="FaucetDrops Backend API")
 # Configure CORS
 app.add_middleware(
@@ -71,6 +109,14 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS", "PUT", "DELETE"], # Added PUT/DELETE for task management
     allow_headers=["Content-Type"],
 )
+app.add_middleware(
+    SessionMiddleware, 
+    secret_key=os.getenv("SESSION_SECRET", "some-random-secret-key-change-this"),
+    max_age=3600  # Session expires in 1 hour
+)
+
+
+app.include_router(auth_router)
 # Validate environment variables
 if not PRIVATE_KEY or PRIVATE_KEY == "0x" + "0"*64:
     pass # Let initialization continue, but rely on function-level gas checks.
@@ -106,7 +152,8 @@ VALID_CHAIN_IDS = [
     42161, # Arbitrum One
     421614, # Arbitrum Sepolia
     137, # Polygon Mainnet
-    80001, # Polygon Mumbai (Added for consistency)
+    56,
+    43114,
 ]
 # Analytics cache storage keys
 ANALYTICS_CACHE_KEYS = {
@@ -172,9 +219,17 @@ CHAIN_CONFIGS = {
         "name": "Ethereum Mainnet",
         "nativeCurrency": {"symbol": "ETH", "decimals": 18}
     },
+    56: {
+        "name": "BNB Mainnet",
+        "nativeCurrency": {"symbol": "BNB", "decimals": 18}
+    },
     42220: {
         "name": "Celo Mainnet",
         "nativeCurrency": {"symbol": "CELO", "decimals": 18}
+    },
+    43114: {
+        "name": "Avalanche",
+        "nativeCurrency": {"symbol": "AVAX", "decimals": 18}
     },
     42161: {
         "name": "Arbitrum One",
@@ -465,116 +520,31 @@ FACTORY_ABI = [
     }
 ]
 # USDT Contracts ABI (keeping existing)
-USDT_CONTRACTS_ABI = [
+
+ERC20_BALANCE_ABI = [
     {
-        "inputs": [
-            {"internalType": "address", "name": "to", "type": "address"},
-            {"internalType": "uint256", "name": "amount", "type": "uint256"}
-        ],
-        "name": "transfer",
-        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {"internalType": "address", "name": "account", "type": "address"}
-        ],
+        "constant": True,
+        "inputs": [{"name": "_owner", "type": "address"}],
         "name": "balanceOf",
-        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-        "stateMutability": "view",
+        "outputs": [{"name": "balance", "type": "uint256"}],
         "type": "function"
     },
     {
+        "constant": True,
         "inputs": [],
         "name": "decimals",
-        "outputs": [{"internalType": "uint8", "name": "", "type": "uint8"}],
-        "stateMutability": "view",
+        "outputs": [{"name": "", "type": "uint8"}],
         "type": "function"
     },
     {
+        "constant": True,
         "inputs": [],
         "name": "symbol",
-        "outputs": [{"internalType": "string", "name": "", "type": "string"}],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "totalSupply",
-        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
-        "stateMutability": "view",
+        "outputs": [{"name": "", "type": "string"}],
         "type": "function"
     }
 ]
-# USDT Management ABI (keeping existing)
-USDT_MANAGEMENT_ABI = [
-    {
-        "inputs": [
-            {"internalType": "uint256", "name": "amount", "type": "uint256"}
-        ],
-        "name": "depositUSDT",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {"internalType": "address", "name": "token", "type": "address"},
-            {"internalType": "uint256", "name": "amount", "type": "uint256"}
-        ],
-        "name": "emergencyWithdraw",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {"internalType": "address", "name": "to", "type": "address"}
-        ],
-        "name": "transferAllUSDT",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [
-            {"internalType": "address", "name": "to", "type": "address"},
-            {"internalType": "uint256", "name": "amount", "type": "uint256"}
-        ],
-        "name": "transferUSDT",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "getUSDTBalance",
-        "outputs": [
-            {"internalType": "uint256", "name": "", "type": "uint256"}
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "owner",
-        "outputs": [
-            {"internalType": "address", "name": "", "type": "address"}
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "inputs": [],
-        "name": "USDT",
-        "outputs": [
-            {"internalType": "address", "name": "", "type": "address"}
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    }
-]
+
 # Full Faucet ABI
 FAUCET_ABI = [
 {
@@ -1761,26 +1731,36 @@ class StagePassRequirements(BaseModel):
     Advance: int = 0
     Legend: int = 0
     Ultimate: int = 0
+
 # Request model for availability check
-class AvailabilityCheckRequest(BaseModel):
-    field: str  # e.g., "username", "email", "twitter_handle"
-    value: str
-    current_wallet: str
+class AvailabilityCheck(BaseModel):
+    field: str              # e.g., "username", "email", "twitter_handle"
+    value: str              # e.g., "Jerydam", "test@gmail.com"
+    current_wallet: str     # The wallet address of the user editing the profile
 
 class DeleteFaucetRequest(BaseModel):
     faucetAddress: str
     userAddress: str # The initiator of the deletion
     chainId: int
+
 class QuestDraft(BaseModel):
     creatorAddress: str
     title: str
-    description: str
-    imageUrl: str
+    description: Optional[str] = ""
+    imageUrl: Optional[str] = ""
     rewardPool: str
     rewardTokenType: str
-    tokenAddress: str
-    distributionConfig: dict
-    faucetAddress: str  # Will be set after deployment
+    tokenAddress: Optional[str] = None
+    # Use Field to map the frontend's camelCase to backend's snake_case
+    token_symbol: Optional[str] = Field(None, alias="tokenSymbol")
+    distributionConfig: Optional[Dict[str, Any]] = None
+    faucetAddress: Optional[str] = None
+    tasks: Optional[List[Dict[str, Any]]] = None
+
+    model_config = ConfigDict(
+        populate_by_name=True,  # ← CRITICAL FIX: Allows both alias and field name
+        from_attributes=True
+    )
 
 class QuestTask(BaseModel):
     id: str
@@ -1795,16 +1775,301 @@ class QuestTask(BaseModel):
     targetPlatform: Optional[str] = None
     stage: str
 
-class QuestDraft(BaseModel):
-    faucetAddress: str  
-    creatorAddress: str
-    title: str
-    description: Optional[str] = ""
-    imageUrl: Optional[str] = ""
-    rewardPool: Optional[str] = "0"
-    rewardTokenType: Optional[str] = "native"
-    tokenAddress: Optional[str] = None
-    distributionConfig: Optional[Dict] = {}
+class BotVerifyRequest(BaseModel):
+    submissionId: str
+    faucetAddress: str
+    walletAddress: str
+    handle: str
+    proofUrl: str
+    taskType: str
+
+import os
+import asyncio
+from playwright.async_api import async_playwright
+import playwright_stealth
+
+class SocialVerificationEngine:
+    def __init__(self, headless=True):
+        self.headless = headless
+        self.user_data_dir = os.path.abspath("./bot_browser_data")
+        # Path to your auth file - MAKE SURE THIS MATCHES YOUR FILE NAME
+        self.auth_file_path = os.path.abspath("auth.json") 
+        
+        if not os.path.exists(self.user_data_dir):
+            os.makedirs(self.user_data_dir, exist_ok=True)
+
+    async def _setup_browser(self, p):
+        print(f"🚀 Launching Desktop Stealth Browser...")
+
+        # ARGS: Minimalist Desktop Setup
+        args = [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--start-maximized", # Open full screen
+            "--disable-infobars",
+        ]
+
+        try:
+            context = await p.chromium.launch_persistent_context(
+                user_data_dir=self.user_data_dir,
+                headless=self.headless,
+                channel="chromium",
+                slow_mo=50,
+                
+                # --- DESKTOP SETTINGS ---
+                # We use a standard viewport and Linux User Agent to match your OS
+                viewport={"width": 1920, "height": 1080}, 
+                user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                is_mobile=False,
+                has_touch=False,
+                # ------------------------
+                
+                permissions=["geolocation", "notifications"], # Grant permissions to look human
+                timeout=60000,
+                ignore_default_args=["--enable-automation"],
+                args=args,
+            )
+            
+            await playwright_stealth.stealth_async(context)
+            
+            # LOAD COOKIES
+            await asyncio.sleep(2)
+            if os.path.exists(self.auth_file_path):
+                print(f"🍪 Loading auth.json...")
+                try:
+                    with open(self.auth_file_path, 'r') as f:
+                        data = json.load(f)
+                        cookies = data if isinstance(data, list) else data.get('cookies', [])
+                        
+                        safe_cookies = []
+                        for c in cookies:
+                            # Remove attributes that often cause conflicts
+                            if 'sameSite' in c and c['sameSite'] not in ['Strict', 'Lax', 'None']:
+                                del c['sameSite']
+                            if 'secure' in c: 
+                                c['secure'] = True # Force secure for https
+                            safe_cookies.append(c)
+                            
+                        await context.add_cookies(safe_cookies)
+                    print("✅ Cookies loaded.")
+                except Exception as e:
+                    print(f"⚠️ Cookie load issue: {e}")
+            
+            return context
+            
+        except Exception as e:
+            print(f"❌ Launch Failed: {e}")
+            raise e
+    async def verify_twitter(self, task_type: str, proof_url: str, participant_handle: str):
+        async with async_playwright() as p:
+            context = await self._setup_browser(p)
+            page = await context.new_page()
+            
+            try:
+                # Direct traffic based on task
+                if task_type == "follow":
+                    # proof_url is the TARGET profile (e.g. https://x.com/zayneTrybe)
+                    return await self._verify_follow(page, proof_url, participant_handle)
+                
+                # ... (add other task types here if needed)
+                
+                return False
+            finally:
+                await context.close()
+
+    async def _verify_follow(self, page, target_profile_url, clean_handle):
+        target_handle = target_profile_url.strip("/").split("/")[-1]
+        user_following_url = f"https://x.com/{clean_handle}/following"
+        
+        print(f"🔹 CHECK: Does @{clean_handle} follow @{target_handle}?")
+
+        # --- SNAPSHOT HELPER ---
+        async def snapshot(name):
+            path = f"debug_{name}.png"
+            await page.screenshot(path=path)
+            print(f"📸 Saved: {path}")
+        # -----------------------
+
+        try:
+            # 1. Navigate
+            print(f"🔹 Navigating to {user_following_url}...")
+            try:
+                await page.goto(user_following_url, wait_until="domcontentloaded", timeout=60000)
+            except Exception as e:
+                print(f"⚠️ Navigation timeout: {e}")
+            
+            await snapshot("step1_loaded")
+
+            # 2. Handle Errors
+            for i in range(3):
+                if await page.locator('span:has-text("Try again")').count() > 0:
+                    print(f"⚠️ Found 'Retry' button (Attempt {i+1}). Clicking...")
+                    await page.locator('span:has-text("Try again")').first.click()
+                    await page.wait_for_timeout(4000)
+                    await snapshot(f"step2_retry_{i+1}")
+                else:
+                    break
+            
+            # 3. Check Login
+            if "login" in page.url or await page.locator('[data-testid="login"]').count() > 0:
+                print("❌ ERROR: Bot is logged out. Your auth.json might be invalid.")
+                await snapshot("error_logged_out")
+                return False
+
+            # 4. Scan List
+            print(f"🔹 Scanning list for @{target_handle}...")
+            for attempt in range(10):
+                # Check for Link
+                found = await page.locator(f'a[href="/{target_handle}"]').count()
+                
+                if found > 0:
+                    print(f"✅ YES! @{clean_handle} follows @{target_handle}")
+                    await snapshot("success_found")
+                    return True
+                
+                # Scroll
+                await page.evaluate("window.scrollBy(0, 1000)")
+                await page.wait_for_timeout(2000)
+                
+                if attempt == 0: await snapshot("step4_scrolling")
+
+            print(f"❌ Target not found.")
+            await snapshot("failed_not_found")
+            return False
+
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            await snapshot("crash")
+            return False
+        
+    async def _verify_retweet(self, page, base_url, tweet_id, clean_handle):
+        """Verify retweet by checking user's timeline"""
+        print(f"🤖 Checking retweets for @{clean_handle}")
+        
+        # Strategy: Go to USER'S profile and look for the retweet
+        user_url = f"https://x.com/{clean_handle}"
+        
+        try:
+            await page.goto(user_url, wait_until="domcontentloaded")
+            await page.wait_for_timeout(4000)
+            
+            for attempt in range(10):
+                # 1. Check for the green retweet indicator in text
+                # 2. Check if the Tweet ID exists in the DOM
+                
+                # Retrieve all tweet articles
+                tweets = await page.locator('article[data-testid="tweet"]').all()
+                for tweet in tweets:
+                    html = await tweet.inner_html()
+                    
+                    # Does this tweet contain the ID of the target tweet?
+                    if tweet_id in html:
+                        # Is it a retweet? (Look for "You Retweeted" or the retweet icon path)
+                        # The SVG path for retweet usually contains certain data, but checking ID is usually enough 
+                        # if it appears on their profile and isn't a quote (quotes are different).
+                        print(f"✅ Found tweet {tweet_id} on user profile!")
+                        return True
+
+                print(f"⏬ Scrolling profile ({attempt+1}/10)...")
+                await page.mouse.wheel(0, 4000)
+                await page.wait_for_timeout(2000)
+            
+            return False
+        except Exception as e:
+            print(f"⚠️ Retweet check failed: {e}")
+            return False
+
+    async def _verify_like(self, page, base_url, clean_handle):
+        """
+        WARNING: X has made Likes PRIVATE. You cannot see who liked a post anymore.
+        This function is highly likely to fail unless the bot is the author of the tweet.
+        """
+        print(f"⚠️ 'Like' verification is technically deprecated by X updates.")
+        return True # Auto-pass likes because they are unverifiable via scraping now.
+
+    async def _verify_quote(self, page, proof_url, clean_handle):
+        """Verify if user quoted the tweet correctly"""
+        print(f"🤖 Checking Quote Tweet: {proof_url}")
+        
+        try:
+            await page.goto(proof_url, wait_until="domcontentloaded")
+            await page.wait_for_timeout(5000)
+
+            # 1. Verify the proof URL belongs to the participant
+            if clean_handle.lower() not in proof_url.lower():
+                print(f"❌ Handle mismatch. URL: {proof_url} vs Handle: {clean_handle}")
+                return False
+
+            # 2. Get the main tweet content
+            main_tweet = page.locator('article[data-testid="tweet"]').first
+            if not await main_tweet.is_visible():
+                print("❌ Could not load tweet.")
+                return False
+            
+            tweet_text = await main_tweet.inner_text()
+            
+            # 3. Check for @faucetdrops mention
+            has_mention = "@faucetdrops" in tweet_text.lower()
+            
+            # 4. Check if it embeds another tweet (is it a quote?)
+            # Look for the embedded tweet container
+            is_quote = await main_tweet.locator('[data-testid="tweet"]').count() > 0 or \
+                       await main_tweet.locator('div[role="link"]').count() > 0
+
+            if has_mention:
+                print(f"✅ Quote verified for @{clean_handle}!")
+                return True
+            else:
+                print(f"❌ Quote missing mentions. Text: {tweet_text[:50]}...")
+                return False
+
+        except Exception as e:
+            print(f"❌ Quote verification error: {str(e)}")
+            return False
+
+    async def _verify_comment(self, page, base_url, tweet_id, clean_handle):
+        """Verify comment using Search Strategy (Most Reliable)"""
+        print(f"🤖 Checking comments for @{clean_handle}")
+        
+        # Construct a search query: "from:User to:Author" is hard if we don't know author handle easily.
+        # "from:User url:TweetID" is better? No, that finds quotes/retweets.
+        # Best: Go to the TWEET URL and look for the reply.
+        
+        try:
+            await page.goto(base_url, wait_until="domcontentloaded")
+            await page.wait_for_timeout(5000)
+            
+            # Scroll down to load replies
+            for attempt in range(15):
+                # Look for the user's handle in the replies area
+                # We specifically look for UserCells or tweet headers with the handle
+                
+                # XPath: Find any link that goes to the user's profile within the timeline stream
+                user_reply_exists = await page.locator(f'article[data-testid="tweet"] a[href="/{clean_handle}"]').count() > 0
+                
+                if user_reply_exists:
+                    print(f"✅ Found comment by @{clean_handle}!")
+                    return True
+                
+                print(f"⏬ Scrolling replies ({attempt+1}/15)...")
+                await page.mouse.wheel(0, 5000)
+                await page.wait_for_timeout(2000)
+                
+            return False
+        except Exception as e:
+            print(f"⚠️ Comment verification failed: {e}")
+            return False
+
+    def clear_browser_cache(self):
+        if os.path.exists(self.user_data_dir):
+            try:
+                shutil.rmtree(self.user_data_dir)
+                os.makedirs(self.user_data_dir, exist_ok=True)
+                print("🧹 Browser cache cleared.")
+            except Exception as e:
+                print(f"⚠️ Cleanup failed: {e}")
 
 class QuestFinalize(BaseModel):
     faucetAddress: str 
@@ -1818,10 +2083,11 @@ class QuestFinalize(BaseModel):
     startDate: str
     endDate: str
     claimWindowHours: int
-    tasks: List[QuestTask]
+    tasks: List[Union[dict, QuestTask]] # Allows dicts or objects
     
-    # 2. Use the correctly defined class here
-    stagePassRequirements: StagePassRequirements 
+    stagePassRequirements: Union[dict, StagePassRequirements] # Allows dicts or objects
+    
+    # 👇 ADD THIS MISSING LINE
     enforceStageRules: bool = False
 
 class Quest(BaseModel):
@@ -1900,20 +2166,37 @@ class DroplistTask(BaseModel):
     points: int = 100
     category: str = "social"
 
+class SyncProfileRequest(BaseModel):
+    wallet_address: str
+    username: str
+    avatar_url: Optional[str] = ""
+    email: Optional[str] = ""
+
 class UserProfileUpdate(BaseModel):
     wallet_address: str
     username: str
     email: Optional[str] = None
     bio: Optional[str] = None
+    
+    # Handles
     twitter_handle: Optional[str] = None
     discord_handle: Optional[str] = None
-    telegram_handle: Optional[str] = None  # NEW
-    farcaster_handle: Optional[str] = None # NEW
+    telegram_handle: Optional[str] = None  
+    farcaster_handle: Optional[str] = None 
+    
+    # IDs
+    telegram_user_id: Optional[str] = None
+    twitter_id: Optional[str] = None     # <--- ADD THIS
+    discord_id: Optional[str] = None     # <--- ADD THIS
+    farcaster_id: Optional[str] = None   # <--- ADD THIS
+    
     avatar_url: Optional[str] = None
+    
     # Security fields
     signature: str 
     message: str 
     nonce: str
+
 class LinkedWalletRequest(BaseModel):
     main_wallet: str
     secondary_wallet: str
@@ -1991,6 +2274,10 @@ class ClaimCustomRequest(BaseModel):
     faucetAddress: str
     chainId: int
     divviReferralData: Optional[str] = None
+class ApprovalRequest(BaseModel):
+    submissionId: str
+    status: str
+
 # Enhanced FaucetTask model
 class FaucetTask(BaseModel):
     title: str
@@ -2060,11 +2347,13 @@ CHAIN_INFO = {
     # Ethereum
     1: {"name": "Ethereum Mainnet", "native_token": "ETH"},
     11155111: {"name": "Ethereum Sepolia", "native_token": "ETH"},
-   
+    56: {"name": "BNB Mainnet", "native_token": "BNB"},
+    97: {"name": "BNB Testnet", "native_token": "BNB"},
     # Celo
     42220: {"name": "Celo Mainnet", "native_token": "CELO"},
     44787: {"name": "Celo Testnet", "native_token": "CELO"},
-   
+    43114: {"name": "Avalanche Mainnet", "native_token": "AVAX"},
+    43113: {"name": "Avalanche Fuji Testnet", "native_token": "AVAX"},
     # Arbitrum
     42161: {"name": "Arbitrum One", "native_token": "ETH"},
     421614: {"name": "Arbitrum Sepolia", "native_token": "ETH"},
@@ -2123,6 +2412,492 @@ class AnalyticsDataManager:
    
     # --- HELPER FUNCTIONS FOR QUEST LOGIC ---
 
+ALCHEMY_API_KEY = os.getenv("ALCHEMY_API_KEY")
+if not ALCHEMY_API_KEY:
+    raise ValueError("ALCHEMY_API_KEY not set in .env")
+
+class Chain(str, Enum):
+    ethereum = "ethereum"
+    base     = "base"
+    arbitrum = "arbitrum"
+    celo     = "celo"
+    lisk     = "lisk"
+    bnb      = "bnb"
+    avalanche = "avalanche"
+
+CHAIN_RPC_URLS = {
+    Chain.ethereum: f"https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}",
+    Chain.base:     f"https://base-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}",
+    Chain.arbitrum: f"https://arb-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}",
+    Chain.celo:     f"https://celo-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}",
+    Chain.lisk:     f"https://lisk-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}",
+    Chain.bnb:      f"https://bnb-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}",
+    Chain.avalanche: f"https://avalanche-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}",
+}
+def get_chain_enum(chain_id: int) -> Chain:
+    """Maps integer chain IDs to the Chain Enum."""
+    mapping = {
+        1: Chain.ethereum,
+        8453: Chain.base,
+        43114: Chain.avalanche,
+        42161: Chain.arbitrum,
+        42220: Chain.celo,
+        1135: Chain.lisk,
+        56:Chain.bnb
+    }
+    return mapping.get(chain_id, Chain.celo)
+# IMMEDIATE FIX FOR DEPLOYMENT
+# Replace lines 2720-2727 in main.py with this:
+
+# Initialize only Ethereum and Arbitrum (most reliable)
+alchemy_clients = {
+    Chain.ethereum: Alchemy(api_key=ALCHEMY_API_KEY, network=Network.ETH_MAINNET),
+    Chain.arbitrum: Alchemy(api_key=ALCHEMY_API_KEY, network=Network.ARB_MAINNET),
+}
+
+# Optional: Try to add other networks but don't crash if they fail
+try:
+    # Try Base with different names
+    try:
+        alchemy_clients[Chain.base] = Alchemy(api_key=ALCHEMY_API_KEY, network=Network.BASE_MAINNET)
+    except (AttributeError, KeyError):
+        try:
+            alchemy_clients[Chain.base] = Alchemy(api_key=ALCHEMY_API_KEY, network=Network.BASE)
+        except (AttributeError, KeyError):
+            pass  # Skip if not available
+except Exception as e:
+    print(f"⚠️ Base Alchemy client initialization skipped: {e}")
+
+try:
+    # Try Celo
+    try:
+        alchemy_clients[Chain.celo] = Alchemy(api_key=ALCHEMY_API_KEY, network=Network.CELO_MAINNET)
+    except (AttributeError, KeyError):
+        try:
+            alchemy_clients[Chain.celo] = Alchemy(api_key=ALCHEMY_API_KEY, network=Network.CELO)
+        except (AttributeError, KeyError):
+            pass
+except Exception as e:
+    print(f"⚠️ Celo Alchemy client initialization skipped: {e}")
+
+try:
+    # Try Lisk
+    try:
+        alchemy_clients[Chain.lisk] = Alchemy(api_key=ALCHEMY_API_KEY, network=Network.LISK_MAINNET)
+    except (AttributeError, KeyError):
+        try:
+            alchemy_clients[Chain.lisk] = Alchemy(api_key=ALCHEMY_API_KEY, network=Network.LISK)
+        except (AttributeError, KeyError):
+            pass
+except Exception as e:
+    print(f"⚠️ Lisk Alchemy client initialization skipped: {e}")
+
+print(f"✅ Initialized Alchemy clients for chains: {list(alchemy_clients.keys())}")
+
+# 4. Update the Middleware logic
+def get_w3(chain: Chain) -> Web3:
+    url = CHAIN_RPC_URLS.get(chain)
+    if not url:
+        raise ValueError(f"No RPC for {chain}")
+    w3 = Web3(Web3.HTTPProvider(url))
+    
+    # All Layer 2s and sidechains (Base, Lisk, Polygon, Arb) 
+    # generally need the PoA middleware for Web3.py
+    if chain in [Chain.base, Chain.arbitrum, Chain.celo, Chain.lisk]:
+        w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+    return w3
+
+# ────────────────────────────────────────────────
+# Models
+# ────────────────────────────────────────────────
+class VerificationRule(BaseModel):
+    type: Literal[
+        "hold_balance", "hold_nft", "tx_count", "wallet_age_days",
+        "interact_contract", "swap_on_dex", "add_liquidity",
+        "claim_rewards", "provide_liquidity_duration"
+    ]
+    contract_address: Optional[str] = Field(None, description="Token/NFT/DEX/Staking/Pool CA")
+    min_amount: Optional[float] = None
+    min_tx_count: Optional[int] = None
+    min_days: Optional[int] = Field(30, ge=1)
+    min_duration_hours: Optional[int] = Field(24, ge=1)
+    pool_address: Optional[str] = None
+
+class VerificationRequest(BaseModel):
+    wallet: str = Field(..., pattern=r"^0x[a-fA-F0-9]{40}$")
+    chain: Chain
+    rules: List[VerificationRule]
+
+class VerificationResult(BaseModel):
+    passed: bool
+    details: str
+    proof: Optional[Dict[str, Any]] = None
+
+class BatchVerificationResponse(BaseModel):
+    wallet: str
+    chain: Chain
+    results: Dict[str, VerificationResult]
+
+# ────────────────────────────────────────────────
+# Shared ABIs
+# ────────────────────────────────────────────────
+ERC20_ABI = [{"constant":True,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"type":"function"}]
+ERC721_ABI = [{"constant":True,"inputs":[{"name":"owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"","type":"uint256"}],"type":"function"}]
+
+# Common event topics (keccak256("EventName(types)"))
+SWAP_TOPIC      = "0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822"  # Uniswap V2/V3 Swap
+MINT_TOPIC      = "0x4c209b5fc8ad50758f13e2e1088ba56a560dff690a1c6fef26394f4c7a3c4823"  # Mint(address,uint)
+TRANSFER_TOPIC  = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"  # Transfer
+REWARD_PAID_TOPIC = "0x9ca6db9048a274e9d6de6d2d20a9a2d1900408d5e0f3b7f686d4d8a0d6b0e1"  # RewardPaid common sig (adjust per contract)
+
+# ────────────────────────────────────────────────
+# Verifiers
+# ────────────────────────────────────────────────
+
+async def verify_hold_balance(wallet: str, chain: Chain, contract_address: str | None, min_amount: float, **_) -> Tuple[bool, str, Dict]:
+    w3 = get_w3(chain)
+    wallet_cs = Web3.to_checksum_address(wallet)
+
+    if not contract_address or contract_address.lower() == "native":
+        bal = w3.from_wei(w3.eth.get_balance(wallet_cs), "ether")
+        unit = "native"
+    else:
+        ca = Web3.to_checksum_address(contract_address)
+        contract = w3.eth.contract(ca, abi=ERC20_ABI)
+        bal_wei = contract.functions.balanceOf(wallet_cs).call()
+        bal = bal_wei / 10**18  # assume 18 decimals; production: fetch decimals()
+        unit = "token"
+
+    passed = bal >= min_amount
+    return passed, f"Balance: {bal:.6f} {unit}", {"balance": float(bal)}
+
+async def verify_hold_nft(wallet: str, chain: Chain, contract_address: str, **_) -> Tuple[bool, str, Dict]:
+    if not contract_address:
+        return False, "contract_address required for hold_nft", {}
+    w3 = get_w3(chain)
+    ca = Web3.to_checksum_address(contract_address)
+    wallet_cs = Web3.to_checksum_address(wallet)
+    contract = w3.eth.contract(ca, abi=ERC721_ABI)
+    bal = contract.functions.balanceOf(wallet_cs).call()
+    passed = bal > 0
+    return passed, f"NFT balance: {bal}", {"nft_balance": bal}
+
+async def verify_tx_count(wallet: str, chain: Chain, min_tx_count: int, **_) -> Tuple[bool, str, Dict]:
+    w3 = get_w3(chain)
+    count = w3.eth.get_transaction_count(Web3.to_checksum_address(wallet))
+    passed = count >= min_tx_count
+    return passed, f"Sent tx count: {count}", {"tx_count": count}
+
+async def verify_wallet_age_days(wallet: str, chain: Chain, min_days: int, **_) -> Tuple[bool, str, Dict]:
+    client = alchemy_clients.get(chain)
+    if not client:
+        return False, f"No Alchemy for {chain}", {}
+
+    oldest_ts = None
+    page_key = None
+    while True:
+        res = client.core.get_asset_transfers(
+            from_block="0x0",
+            to_block="latest",
+            from_address=wallet,
+            category=["external","internal","erc20","erc721","erc1155"],
+            max_count="0x3e8",
+            page_key=page_key
+        )
+        transfers = res["transfers"]
+        if transfers:
+            oldest = min(transfers, key=lambda x: int(x["blockNum"], 16))
+            ts = datetime.fromisoformat(oldest["metadata"]["blockTimestamp"].replace("Z", "+00:00"))
+            if oldest_ts is None or ts < oldest_ts:
+                oldest_ts = ts
+        page_key = res.get("pageKey")
+        if not page_key: break
+
+    if not oldest_ts:
+        return False, "No tx history", {}
+    age_days = (datetime.now(timezone.utc) - oldest_ts).days
+    passed = age_days >= min_days
+    return passed, f"Age: {age_days} days", {"age_days": age_days, "first_ts": oldest_ts.isoformat()}
+
+async def verify_interact_contract(wallet: str, chain: Chain, contract_address: str, **_) -> Tuple[bool, str, Dict]:
+    client = alchemy_clients.get(chain)
+    if not client or not contract_address:
+        return False, "Missing client or contract_address", {}
+
+    res = client.core.get_asset_transfers(
+        from_block="0x0",
+        to_block="latest",
+        to_address=contract_address,
+        from_address=wallet,
+        category=["external"],
+        max_count="0x1"  # just need existence
+    )
+    passed = len(res["transfers"]) > 0
+    proof = {"tx_example": res["transfers"][0]["hash"] if passed else None}
+    return passed, "Interacted" if passed else "No interaction", proof
+
+async def verify_swap_on_dex(wallet: str, chain: Chain, contract_address: str | None, **_) -> Tuple[bool, str, Dict]:
+    # contract_address = DEX Router or Pair; here assume router/pair
+    if not contract_address:
+        return False, "contract_address (router/pair) required", {}
+    client = alchemy_clients.get(chain)
+    if not client:
+        return False, "No Alchemy client", {}
+
+    # Simple: check if any Swap event with from == wallet
+    from_block = "0x0"  # heavy; production: limit range or use subgraph
+    logs = client.core.get_logs(
+        from_block=from_block,
+        to_block="latest",
+        address=Web3.to_checksum_address(contract_address),
+        topics=[[SWAP_TOPIC], [Web3.to_bytes(hexstr=wallet).rjust(32, b'\0').hex()]]
+    )
+    passed = len(logs) > 0
+    return passed, f"Swaps found: {len(logs)}", {"swap_count": len(logs)}
+
+async def verify_add_liquidity(wallet: str, chain: Chain, pool_address: str | None, contract_address: str | None, **_) -> Tuple[bool, str, Dict]:
+    # pool_address = LP pair; contract_address fallback to pool
+    target = pool_address or contract_address
+    if not target:
+        return False, "pool_address or contract_address required", {}
+    client = alchemy_clients.get(chain)
+    if not client:
+        return False, "No Alchemy", {}
+
+    # Look for Mint event to wallet or Transfer LP token to wallet
+    logs = client.core.get_logs(
+        from_block="0x0",
+        to_block="latest",
+        address=Web3.to_checksum_address(target),
+        topics=[[MINT_TOPIC], None, [Web3.to_bytes(hexstr=wallet).rjust(32, b'\0').hex()]]
+    )
+    passed = len(logs) > 0
+    return passed, f"LP adds found: {len(logs)}", {"add_count": len(logs)}
+
+async def verify_claim_rewards(wallet: str, chain: Chain, contract_address: str, **_) -> Tuple[bool, str, Dict]:
+    if not contract_address:
+        return False, "Staking contract_address required", {}
+    client = alchemy_clients.get(chain)
+    if not client:
+        return False, "No Alchemy", {}
+
+    logs = client.core.get_logs(
+        from_block="0x0",
+        to_block="latest",
+        address=Web3.to_checksum_address(contract_address),
+        topics=[[REWARD_PAID_TOPIC], [Web3.to_bytes(hexstr=wallet).rjust(32, b'\0').hex()]]
+    )
+    passed = len(logs) > 0
+    return passed, f"Claims found: {len(logs)}", {"claim_count": len(logs)}
+
+async def verify_provide_liquidity_duration(wallet: str, chain: Chain, pool_address: str, min_duration_hours: int, **_) -> Tuple[bool, str, Dict]:
+    # FULL IMPL REQUIRES DB + cron to snapshot LP balance over time
+    # Here: simple current hold check + note
+    if not pool_address:
+        return False, "pool_address (LP token) required", {}
+
+    w3 = get_w3(chain)
+    wallet_cs = Web3.to_checksum_address(wallet)
+    lp_ca = Web3.to_checksum_address(pool_address)
+    contract = w3.eth.contract(lp_ca, abi=ERC20_ABI)
+    bal = contract.functions.balanceOf(wallet_cs).call() / 10**18
+
+    # TODO: Check DB for snapshot from min_duration_hours ago
+    # If bal was >0 then and still >0 now → pass
+    passed = bal > 0  # placeholder
+    details = f"Current LP balance: {bal:.4f} — duration check requires persistence layer"
+    return passed, details, {"current_lp": float(bal), "note": "Implement snapshot DB for real duration check"}
+
+async def run_onchain_verification(wallet: str, chain: Chain, task: Dict) -> bool:
+    """
+    Routes the verification request to the correct logic based on task['action'].
+    Includes debug prints to trace execution step-by-step.
+    """
+    action = task.get("action")
+    wallet_cs = Web3.to_checksum_address(wallet)
+    
+    print(f"\n--- 🕵️ STARTING VERIFICATION ---")
+    print(f"🔹 Wallet: {wallet_cs}")
+    print(f"🔹 Chain: {chain}")
+    print(f"🔹 Action: {action}")
+    print(f"🔹 Task Config: {task}")
+
+    try:
+        # 1. Token Balance Check
+        if action == "hold_token":
+            print("👉 Entering 'hold_token' logic...")
+            w3 = get_w3(chain)
+            contract_address = task.get("targetContractAddress")
+            min_amount = float(task.get("minAmount", 0))
+            
+            print(f"   Target Contract: {contract_address}")
+            print(f"   Min Amount Required: {min_amount}")
+
+            balance = 0.0
+
+            if not contract_address or contract_address.lower() == "native":
+                print("   Checking NATIVE token balance (ETH/CELO/etc)...")
+                balance_wei = w3.eth.get_balance(wallet_cs)
+                balance = float(w3.from_wei(balance_wei, "ether"))
+                print(f"   Raw Wei: {balance_wei}")
+            else:
+                print("   Checking ERC20 token balance...")
+                ca = Web3.to_checksum_address(contract_address)
+                contract = w3.eth.contract(address=ca, abi=ERC20_ABI)
+                balance_raw = contract.functions.balanceOf(wallet_cs).call()
+                balance = balance_raw / 10**18 
+                print(f"   Raw Token Balance: {balance_raw}")
+
+            print(f"   ✅ Calculated Balance: {balance}")
+            print(f"   🤔 Check: {balance} >= {min_amount}?")
+            return float(balance) >= min_amount
+
+        # 2. NFT Holder Check
+        elif action == "hold_nft":
+            print("👉 Entering 'hold_nft' logic...")
+            w3 = get_w3(chain)
+            contract_address = task.get("targetContractAddress")
+            
+            if not contract_address: 
+                print("   ❌ Error: No contract address provided for NFT check.")
+                return False
+            
+            ca = Web3.to_checksum_address(contract_address)
+            print(f"   Checking NFT contract: {ca}")
+            
+            contract = w3.eth.contract(address=ca, abi=ERC721_ABI)
+            balance = contract.functions.balanceOf(wallet_cs).call()
+            
+            print(f"   ✅ NFT Balance Found: {balance}")
+            print(f"   🤔 Check: {balance} > 0?")
+            return balance > 0
+
+        # 3. Wallet Age Check - FIXED VERSION
+        elif action == "wallet_age":
+            print("👉 Entering 'wallet_age' logic...")
+            min_days = int(task.get("minDays", 30))
+            print(f"   Min Days Required: {min_days}")
+
+            # Try Alchemy first
+            client = alchemy_clients.get(chain)
+            if client:
+                try:
+                    print("   Attempting Alchemy API for wallet age...")
+                    res = client.core.get_asset_transfers(
+                        from_block="0x0",
+                        to_block="latest",
+                        from_address=wallet,
+                        category=["external", "internal"],  # Include both types
+                        max_count=1,
+                        order="asc"
+                        # DON'T use with_metadata - it's unreliable
+                    )
+                    
+                    # Safe access to transfers
+                    transfers_list = res.transfers if hasattr(res, 'transfers') else res.get('transfers', [])
+                    
+                    if transfers_list and len(transfers_list) > 0:
+                        first_tx = transfers_list[0]
+                        
+                        # Try to get timestamp from metadata if available
+                        if hasattr(first_tx, 'metadata') and first_tx.metadata:
+                            first_tx_ts = first_tx.metadata.block_timestamp
+                            print(f"   ✅ Got timestamp from Alchemy metadata: {first_tx_ts}")
+                        else:
+                            # Fallback: Get block number and fetch block details
+                            block_num = first_tx.block_num if hasattr(first_tx, 'block_num') else None
+                            if block_num:
+                                print(f"   Fetching block details for block {block_num}...")
+                                w3 = get_w3(chain)
+                                block = w3.eth.get_block(block_num)
+                                timestamp = block['timestamp']
+                                first_tx_ts = datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
+                                print(f"   ✅ Got timestamp from block: {first_tx_ts}")
+                            else:
+                                raise Exception("No block number available")
+                        
+                        oldest_dt = datetime.fromisoformat(first_tx_ts.replace("Z", "+00:00"))
+                        age_days = (datetime.now(timezone.utc) - oldest_dt).days
+                        
+                        print(f"   ✅ Calculated Wallet Age: {age_days} days")
+                        print(f"   🤔 Check: {age_days} >= {min_days}?")
+                        return age_days >= min_days
+                    
+                    print("   ⚠️ No transactions found via Alchemy")
+                    
+                except Exception as alchemy_error:
+                    print(f"   ⚠️ Alchemy method failed: {alchemy_error}")
+            
+            # FALLBACK: Direct RPC method
+            print("   Using Web3 fallback method...")
+            w3 = get_w3(chain)
+            
+            # Get current block
+            current_block = w3.eth.block_number
+            print(f"   Current block: {current_block}")
+            
+            # Binary search for first transaction
+            oldest_block_with_tx = None
+            
+            # Quick scan: check recent blocks first (more efficient)
+            scan_interval = max(1, current_block // 100)  # Check 100 points
+            
+            for block_num in range(0, current_block, scan_interval):
+                try:
+                    tx_count = w3.eth.get_transaction_count(wallet_cs, block_num)
+                    if tx_count > 0:
+                        oldest_block_with_tx = block_num
+                        break
+                except:
+                    continue
+            
+            if not oldest_block_with_tx:
+                print("   ❌ No transactions found (New wallet)")
+                return False
+            
+            # Get timestamp from that block
+            block = w3.eth.get_block(oldest_block_with_tx)
+            timestamp = block['timestamp']
+            oldest_dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+            age_days = (datetime.now(timezone.utc) - oldest_dt).days
+            
+            print(f"   ✅ Wallet Age (Web3 method): {age_days} days")
+            print(f"   🤔 Check: {age_days} >= {min_days}?")
+            return age_days >= min_days
+
+        # 4. Transaction Count Check
+        elif action == "tx_count":
+            print("👉 Entering 'tx_count' logic...")
+            w3 = get_w3(chain)
+            min_tx = int(task.get("minTxCount", 1))
+            print(f"   Min Transactions Required: {min_tx}")
+            
+            count = w3.eth.get_transaction_count(wallet_cs)
+            print(f"   ✅ On-Chain Nonce (Tx Count): {count}")
+            
+            print(f"   🤔 Check: {count} >= {min_tx}?")
+            return count >= min_tx
+
+        print(f"❌ Unknown action type: {action}")
+        return False
+
+    except Exception as e:
+        print(f"❌ CRITICAL VERIFICATION ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return False# Mapper
+# ────────────────────────────────────────────────
+VERIFIER_MAP = {
+    "hold_balance":             verify_hold_balance,
+    "hold_nft":                 verify_hold_nft,
+    "tx_count":                 verify_tx_count,
+    "wallet_age_days":          verify_wallet_age_days,
+    "interact_contract":        verify_interact_contract,
+    "swap_on_dex":              verify_swap_on_dex,
+    "add_liquidity":            verify_add_liquidity,
+    "claim_rewards":            verify_claim_rewards,
+    "provide_liquidity_duration": verify_provide_liquidity_duration,
+}
 async def get_quest_context(faucet_address: str):
     """
     Fetches the Stage Requirements and Task List from the DB to verify points and stages.
@@ -2209,6 +2984,130 @@ async def get_token_info(self, token_address: str, provider: Web3, chain_id: int
         except Exception as e:
             print(f"Error fetching token info for {token_address}: {str(e)}")
             return {"symbol": "TOKEN", "decimals": 18}
+        
+async def process_auto_approval(submission_id: str, faucet_address: str, wallet_address: str):
+    """
+    Robustly handles point distribution.
+    FIXES:
+    1. Creates user_progress row if it doesn't exist (Fixes 'Reset on Refresh').
+    2. Persists the task ID correctly to the database.
+    """
+    try:
+        # 1. Normalize Addresses (Checksum)
+        faucet_checksum = Web3.to_checksum_address(faucet_address)
+        wallet_checksum = Web3.to_checksum_address(wallet_address)
+
+        # 2. Get Submission Info
+        sub_res = supabase.table("submissions").select("*").eq("submission_id", submission_id).execute()
+        if not sub_res.data:
+            print(f"⚠️ Submission {submission_id} not found during auto-approval.")
+            return
+        
+        submission = sub_res.data[0]
+        task_id = submission['task_id']
+        
+        # 3. Update Submission Status to Approved
+        verification_note = "Verified by System"
+        if submission.get('submission_type') == "none":
+            verification_note = "Instant Reward"
+
+        supabase.table("submissions").update({
+            "status": "approved", 
+            "reviewed_at": datetime.utcnow().isoformat(),
+            "notes": verification_note
+        }).eq("submission_id", submission_id).execute()
+
+        # 4. Fetch Task Details (Points & Stage)
+        stage_reqs, tasks = await get_quest_context(faucet_checksum)
+        task = next((t for t in tasks if t['id'] == task_id), None)
+        
+        if not task:
+            print(f"⚠️ Task {task_id} not found in quest context.")
+            return
+
+        points_to_add = int(task.get('points', 0))
+        task_stage = task.get('stage', 'Beginner')
+
+        # 5. FETCH OR INITIALIZE User Progress
+        prog_res = supabase.table("user_progress").select("*").eq("wallet_address", wallet_checksum).eq("faucet_address", faucet_checksum).execute()
+        
+        curr_prog = None
+        
+        if not prog_res.data:
+            # ROW MISSING: Create it now
+            print(f"🆕 Creating new progress row for {wallet_checksum}")
+            new_profile = {
+                "wallet_address": wallet_checksum,
+                "faucet_address": faucet_checksum,
+                "total_points": 0,
+                "stage_points": {"Beginner": 0, "Intermediate": 0, "Advance": 0, "Legend": 0, "Ultimate": 0},
+                "completed_tasks": [],
+                "current_stage": "Beginner",
+                "updated_at": datetime.now().isoformat()
+            }
+            # Insert and get the new row back
+            insert_res = supabase.table("user_progress").insert(new_profile).execute()
+            if insert_res.data:
+                curr_prog = insert_res.data[0]
+        else:
+            curr_prog = prog_res.data[0]
+
+        if not curr_prog:
+            print("❌ Failed to initialize user progress row.")
+            return
+
+        # 6. UPDATE POINTS & SAVE TASK ID
+        current_completed_tasks = curr_prog.get('completed_tasks') or []
+        
+        # Only process if not already done
+        if task_id not in current_completed_tasks:
+            # A. Add ID
+            current_completed_tasks.append(task_id)
+            
+            # B. Calc Points
+            new_total = (curr_prog.get('total_points') or 0) + points_to_add
+            current_stage_points = curr_prog.get('stage_points') or {}
+            
+            # Ensure keys exist
+            for s in ["Beginner", "Intermediate", "Advance", "Legend", "Ultimate"]:
+                if s not in current_stage_points: current_stage_points[s] = 0
+
+            current_stage_points[task_stage] += points_to_add
+            new_stage_name = calculate_current_stage(current_stage_points, stage_reqs)
+
+            # C. Save to DB
+            update_res = supabase.table("user_progress").update({
+                "total_points": new_total,
+                "stage_points": current_stage_points,
+                "completed_tasks": current_completed_tasks, # <--- THIS PERSISTS THE 'DONE' STATE
+                "current_stage": new_stage_name,
+                "updated_at": datetime.now().isoformat()
+            }).eq("wallet_address", wallet_checksum).eq("faucet_address", faucet_checksum).execute()
+
+            print(f"✅ Points Saved: {points_to_add}. Task {task_id} marked done.")
+
+            # 7. Sync Leaderboard
+            part_res = supabase.table("quest_participants").select("points").eq("quest_address", faucet_checksum).eq("wallet_address", wallet_checksum).execute()
+            if part_res.data:
+                current_lb_points = part_res.data[0].get('points', 0)
+                supabase.table("quest_participants").update({
+                    "points": current_lb_points + points_to_add
+                }).eq("quest_address", faucet_checksum).eq("wallet_address", wallet_checksum).execute()
+
+    except Exception as e:
+        print(f"❌ Auto-processing failed: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+def generate_slug(name: str):
+    if not name:
+        return "faucet"
+    # Create a URL-friendly slug
+    slug = name.lower().strip()
+    slug = re.sub(r'[^\w\s-]', '', slug)
+    slug = re.sub(r'[\s_-]+', '-', slug)
+    return slug
+
 async def get_all_faucets_from_network(self, network: Dict) -> List[Dict]:
         """Fetch all faucets from a single network"""
         try:
@@ -3195,7 +4094,12 @@ async def wait_for_transaction_receipt(w3: Web3, tx_hash: str, timeout: int = 30
 # Basic health check
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    # Using timezone-aware UTC is the current best practice
+    return {
+        "status": "ok", 
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
 @app.get("/chain-info/{chain_id}")
 async def get_chain_info_endpoint(chain_id: int):
     """Get chain-specific information."""
@@ -4082,6 +4986,25 @@ async def get_user_profile(wallet_address: str) -> Optional[UserProfile]:
     except Exception as e:
         print(f"Database error in get_user_profile: {str(e)}")
         return None
+    
+
+async def verify_telegram(self, channel_url, participant_username):
+        async with async_playwright() as p:
+            browser, context = await self._setup_browser(p)
+            page = await context.new_page()
+            try:
+                await page.goto(channel_url)
+                return participant_username.lower() in await page.content()
+            except: return False
+            finally: await browser.close()
+
+async def verify_discord(self, message_url, participant_tag):
+        async with async_playwright() as p:
+            browser, context = await self._setup_browser(p)
+            page = await context.new_page()
+            await page.goto(message_url)
+            return participant_tag in await page.content()
+
 async def generate_new_drop_code_only(faucet_address: str) -> str:
     """
     Generate a new drop code and update it in the database with smart timing logic.
@@ -4185,19 +5108,35 @@ async def check_quest_name_availability(name: str):
         return {"exists": False, "valid": True, "error": str(e)}
 
 @app.get("/api/profile/user/{identifier}")
-async def get_profile_by_username_or_address(identifier: str):
-    # 1. Try searching by Username
-    response = supabase.table("user_profiles").select("*").ilike("username", identifier).execute()
-    
-    # 2. If not found, try searching by Wallet Address
-    if not response.data:
-        response = supabase.table("user_profiles").select("*").eq("wallet_address", identifier.lower()).execute()
+async def get_user_profile(identifier: str):
+    """
+    Smart endpoint: Search by Username OR Wallet Address.
+    """
+    try:
+        # 1. Try searching by Wallet Address first (Exact Match)
+        # We assume identifiers starting with '0x' are wallets
+        if identifier.startswith("0x") and len(identifier) == 42:
+            response = supabase.table("user_profiles")\
+                .select("*")\
+                .eq("wallet_address", identifier.lower())\
+                .execute()
+        else:
+            # 2. Otherwise, treat as Username (Case Insensitive)
+            response = supabase.table("user_profiles")\
+                .select("*")\
+                .ilike("username", identifier)\
+                .execute()
         
-    if not response.data:
-        raise HTTPException(status_code=404, detail="User not found")
+        if not response.data:
+            raise HTTPException(status_code=404, detail="User not found")
             
-    return {"success": True, "profile": response.data[0]}
-
+        return {"success": True, "profile": response.data[0]}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.get("/api/profile/user/{username}")
 async def get_profile_by_username(username: str):
     """
@@ -4222,43 +5161,73 @@ async def get_profile_by_username(username: str):
 
 @app.post("/api/profile/update")
 async def update_user_profile(request: UserProfileUpdate):
-    """
-    Updates or creates a user profile. 
-    Verifies that the request is signed by the wallet owner.
-    """
     try:
         # 1. Standardize the address
         wallet_address = Web3.to_checksum_address(request.wallet_address)
+        wallet_lower = wallet_address.lower()
         
-        # 2. Security: Verify the signature
-        # This prevents anyone from updating someone else's profile by just knowing their address
+        # 2. Security: Verify signature
         if not verify_signature(wallet_address, request.message, request.signature):
-            raise HTTPException(status_code=401, detail="Invalid signature. Ownership verification failed.")
+            raise HTTPException(status_code=401, detail="Invalid signature. You are not the owner of this wallet.")
 
-        # 3. Prepare the data for Supabase
-        # We use snake_case to match standard PostgreSQL/Supabase column naming
+        # =========================================================
+        # 3. Check All Unique Fields (Username, Email, Twitter)
+        # =========================================================
+        def check_is_taken(column, value):
+            if not value: return False # Skip empty fields
+            existing = supabase.table("user_profiles").select("wallet_address").eq(column, value).execute()
+            if existing.data:
+                found_wallet = existing.data[0]['wallet_address']
+                if found_wallet.lower() != wallet_lower:
+                    return True
+            return False
+
+        # Run the checks
+        if check_is_taken("username", request.username):
+            raise HTTPException(status_code=400, detail="Username is already taken.")
+        if check_is_taken("email", request.email):
+            raise HTTPException(status_code=400, detail="Email is already used by another account.")
+        if check_is_taken("twitter_handle", request.twitter_handle):
+            raise HTTPException(status_code=400, detail="Twitter handle is already linked to another account.")
+
+        # =========================================================
+        # 4. Prepare data (NOW INCLUDES TELEGRAM_USER_ID)
+        # =========================================================
+        # 4. Prepare data
         profile_data = {
-            "wallet_address": wallet_address.lower(), # Store as lowercase for easier lookup
-            "username": request.username,
+            "wallet_address": wallet_lower,
+            "username": request.username, 
             "email": request.email,
             "bio": request.bio,
+            "avatar_url": request.avatar_url,
+            
+            # Save Handles
             "twitter_handle": request.twitter_handle,
             "discord_handle": request.discord_handle,
             "telegram_handle": request.telegram_handle,
             "farcaster_handle": request.farcaster_handle,
-            "avatar_url": request.avatar_url,
+            
+            # Save Permanent IDs
+            "telegram_user_id": request.telegram_user_id,
+            "twitter_id": request.twitter_id,      # <--- SAVE IT HERE
+            "discord_id": request.discord_id,      # <--- SAVE IT HERE
+            "farcaster_id": request.farcaster_id,  # <--- SAVE IT HERE
+            
             "updated_at": datetime.now().isoformat()
         }
 
-        # 4. Upsert into Supabase 'user_profiles' table
+        # 5. Upsert
+        response = supabase.table("user_profiles").upsert(
+            profile_data, 
+            on_conflict="wallet_address"
+        ).execute()
+
+        # 5. Upsert
         response = supabase.table("user_profiles").upsert(
             profile_data, 
             on_conflict="wallet_address"
         ).execute()
         
-        if not response.data:
-            raise HTTPException(status_code=500, detail="Failed to save profile to database")
-            
         return {
             "success": True, 
             "message": "Profile updated successfully", 
@@ -4268,8 +5237,8 @@ async def update_user_profile(request: UserProfileUpdate):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"💥 Profile Update Error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal server error during profile update")
+        print(f"💥 Update Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
 @app.post("/faucet-x-template")
 async def save_faucet_x_template(request: CustomXPostTemplate):
@@ -4550,56 +5519,59 @@ async def debug_drop_code_status(faucetAddress: str):
         }
 
 @app.post("/api/profile/check-availability")
-async def check_availability(request: AvailabilityCheckRequest):
-    """
-    Checks if a profile field value is already taken by ANOTHER user.
-    Uses 'ilike' for case-insensitive comparison.
-    """
-    try:
-        if not request.value:
+async def check_availability(check: AvailabilityCheck):
+        try:
+            # 2. Map frontend field names to DB column names (if they differ)
+            # This prevents SQL injection or invalid column errors
+            field_map = {
+                "username": "username",
+                "email": "email",
+                "twitter_handle": "twitter_handle",
+                "discord_handle": "discord_handle",
+                "telegram_handle": "telegram_handle",
+                "farcaster_handle": "farcaster_handle"
+            }
+            
+            if check.field not in field_map:
+                return {"available": True} # Unknown field, ignore check
+
+            db_column = field_map[check.field]
+            check_value = check.value.strip()
+            
+            # Standardize the incoming wallet to lowercase for comparison
+            requesting_wallet = check.current_wallet.lower() if check.current_wallet else ""
+
+            # 3. QUERY: Find ANY record with this specific value
+            # We select the 'wallet_address' so we can identify the owner
+            response = supabase.table("user_profiles")\
+                .select("wallet_address")\
+                .ilike(db_column, check_value)\
+                .execute()
+
+            # 4. LOGIC: Analyze the result
+            if response.data:
+                # We found a record! Now, who owns it?
+                owner_wallet = response.data[0]['wallet_address'].lower()
+
+                # COMPARE: Is the owner the same person making the request?
+                if owner_wallet == requesting_wallet:
+                    # YES -> It's me! I am allowed to keep my own username.
+                    return {"available": True}
+                else:
+                    # NO -> It belongs to someone else.
+                    return {
+                        "available": False, 
+                        "message": f"This {check.field.replace('_', ' ')} is already taken."
+                    }
+
+            # 5. No record found -> Totally new and available
             return {"available": True}
 
-        # Map frontend field names to database column names
-        column_map = {
-            "username": "username",
-            "email": "email",
-            "twitter_handle": "twitter_handle",
-            "discord_handle": "discord_handle",
-            "telegram_handle": "telegram_handle",
-            "farcaster_handle": "farcaster_handle"
-        }
-
-        if request.field not in column_map:
-            raise HTTPException(status_code=400, detail="Invalid field for uniqueness check")
-
-        column = column_map[request.field]
+        except Exception as e:
+            print(f"Check Error: {e}")
+            # Default to True on error to avoid blocking the UI
+            return {"available": True}
         
-        # Ensure address is checksummed
-        try:
-            current_wallet_cs = Web3.to_checksum_address(request.current_wallet)
-        except:
-            raise HTTPException(status_code=400, detail="Invalid wallet address format")
-
-        # UPDATED QUERY: Use .ilike() instead of .eq()
-        # This checks if 'Value', 'value', or 'VALUE' exists, excluding the current user
-        response = supabase.table("user_profiles")\
-            .select("wallet_address")\
-            .ilike(column, request.value)\
-            .neq("wallet_address", current_wallet_cs)\
-            .execute()
-
-        if response.data and len(response.data) > 0:
-            return {
-                "available": False, 
-                "message": f"This {request.field.replace('_', ' ')} is already in use."
-            }
-
-        return {"available": True, "message": "Available"}
-
-    except Exception as e:
-        print(f"Availability check error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-    
 # API Endpoints
 @app.post("/api/droplist/config")
 async def save_droplist_config(request: DroplistConfigRequest):
@@ -4706,7 +5678,7 @@ async def upload_image(file: UploadFile = File(...)):
         print(f"❌ Upload Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Image upload failed: {str(e)}")
 
-@app.get("/api/users/{wallet_address}")
+@app.get("/api/users/{wallet_address}", tags=["User Management"])
 async def get_user_profile_endpoint(wallet_address: str):
     """Get user profile"""
     try:
@@ -4715,14 +5687,17 @@ async def get_user_profile_endpoint(wallet_address: str):
         if not profile:
             raise HTTPException(status_code=404, detail="User profile not found")
        
-        return profile.dict()
+        # FIX: Simply return the profile. 
+        # Since it's already a dict, FastAPI will automatically 
+        # serialize it to JSON for you.
+        return profile
        
     except HTTPException:
         raise
     except Exception as e:
         print(f"Error getting user profile: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get user profile: {str(e)}")
-@app.post("/api/users")
+        # It's helpful to keep this print for debugging
+        raise HTTPException(status_code=500, detail=f"Failed to get user profile: {str(e)}")@app.post("/api/users")
 async def create_user_profile_endpoint(profile: UserProfile):
     """Create new user profile"""
     try:
@@ -5037,58 +6012,82 @@ async def save_quest(request: Quest):
 async def get_quest_by_address(faucetAddress: str):
     """
     Fetch a single quest by faucet address OR draft ID.
-    Handles strict address validation bypass for drafts.
+    Handles strict address validation bypass for drafts and rehydrates tasks.
     """
     try:
         print(f"🔍 Fetching quest details for: {faucetAddress}")
         
-        # --- FIX STARTS HERE ---
-        # Allow Draft IDs (strings) to pass through. Only checksum if it looks like an EVM address.
+        # 1. VALIDATE ADDRESS/ID
         if Web3.is_address(faucetAddress):
             faucet_address = Web3.to_checksum_address(faucetAddress)
         else:
             faucet_address = faucetAddress # It's a Draft ID (e.g. "draft-uuid...")
-        # --- FIX ENDS HERE ---
 
-        # 1. Fetch quest from database
-        response = supabase.table("quests").select("*").eq(
-            "faucet_address", faucet_address
-        ).execute()
-        
+        # 2. FETCH CORE METADATA
+        response = supabase.table("quests").select("*").eq("faucet_address", faucet_address).execute()
         if not response.data:
-            raise HTTPException(status_code=404, detail=f"Quest not found: {faucet_address}")
+            raise HTTPException(status_code=404, detail=f"Quest not found")
         
         quest_row = response.data[0]
+
+        participants_count_res = supabase.table("quest_participants")\
+            .select("wallet_address", count="exact")\
+            .eq("quest_address", faucet_address)\
+            .execute()
         
-        # 2. Fetch tasks
+        total_participants = participants_count_res.count if hasattr(participants_count_res, 'count') else 0
+        
+        # 3. FETCH TASKS FROM faucet_tasks TABLE
+        # We query the separate table where tasks are stored during draft/creation
         tasks = []
-        tasks_res = supabase.table("faucet_tasks").select("tasks").eq(
-            "faucet_address", faucet_address
-        ).execute()
+        try:
+            tasks_res = supabase.table("faucet_tasks").select("tasks").eq(
+                "faucet_address", faucet_address
+            ).execute()
+            
+            if tasks_res.data and len(tasks_res.data) > 0:
+                # Extract the 'tasks' column from the first row found
+                tasks = tasks_res.data[0].get("tasks", [])
+                print(f"✅ Successfully rehydrated {len(tasks)} tasks for {faucet_address}")
+            else:
+                print(f"⚠️ No tasks found in faucet_tasks for {faucet_address}")
+        except Exception as task_err:
+            print(f"⚠️ Error fetching tasks for {faucet_address}: {str(task_err)}")
+            # Don't fail the whole request if tasks fail, just return empty list
+            tasks = []
         
-        if tasks_res.data:
-            tasks = tasks_res.data[0].get("tasks", [])
-        
-        # 3. Parse Metadata (Dates & JSON)
-        start_date = None
-        if quest_row.get("start_date"): 
-            start_date = datetime.fromisoformat(quest_row.get("start_date").replace('Z', '+00:00')).strftime('%Y-%m-%d')
-
-        end_date = None
-        if quest_row.get("end_date"): 
-            end_date = datetime.fromisoformat(quest_row.get("end_date").replace('Z', '+00:00')).strftime('%Y-%m-%d')
-
-        stage_reqs = quest_row.get("stage_pass_requirements")
-        if isinstance(stage_reqs, str):
+        # 4. PARSE DATES SAFELY
+        def parse_iso_date(date_str):
+            if not date_str:
+                return None
             try:
-                stage_reqs = json.loads(stage_reqs)
-            except:
-                stage_reqs = {}
+                # Handle Z or +00:00 offsets
+                clean_date = date_str.replace('Z', '+00:00')
+                return datetime.fromisoformat(clean_date).strftime('%Y-%m-%d')
+            except Exception:
+                return None
 
-        # 4. Return Data
+        start_date = parse_iso_date(quest_row.get("start_date"))
+        end_date = parse_iso_date(quest_row.get("end_date"))
+
+        # 5. PARSE JSON FIELDS
+        # Supabase usually returns dicts, but if it's stored as a string, we parse it
+        def ensure_dict(field_data):
+            if isinstance(field_data, str):
+                try:
+                    return json.loads(field_data)
+                except:
+                    return {}
+            return field_data or {}
+
+        stage_reqs = ensure_dict(quest_row.get("stage_pass_requirements"))
+        dist_config = ensure_dict(quest_row.get("distribution_config"))
+
+        # 6. ASSEMBLE FINAL DATA
         quest_data = {
             "faucetAddress": faucet_address,
             "title": quest_row.get("title"),
+            "totalParticipants": total_participants,
             "description": quest_row.get("description"),
             "isActive": quest_row.get("is_active", False),
             "isDraft": quest_row.get("is_draft", False),
@@ -5096,11 +6095,11 @@ async def get_quest_by_address(faucetAddress: str):
             "creatorAddress": quest_row.get("creator_address"),
             "startDate": start_date,
             "endDate": end_date,
-            "tasks": tasks,
+            "tasks": tasks,  # <--- FIXED: Now populated from faucet_tasks
             "tokenSymbol": quest_row.get("token_symbol"),
             "imageUrl": quest_row.get("image_url"),
             "stagePassRequirements": stage_reqs,
-            "distributionConfig": quest_row.get("distribution_config"),
+            "distributionConfig": dist_config,
             "tokenAddress": quest_row.get("token_address"),
             "rewardTokenType": quest_row.get("reward_token_type")
         }
@@ -5110,21 +6109,142 @@ async def get_quest_by_address(faucetAddress: str):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Error fetching quest: {str(e)}")
+        print(f"❌ Critical Error fetching quest: {str(e)}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-# --- GET ALL QUESTS (Updated to fetch new fields) ---
 
+@app.get("/api/faucets/by-slug/{slug_or_address}", tags=["Faucet Management"])
+async def get_faucet_address_by_slug(slug_or_address: str):
+    try:
+        clean_input = slug_or_address.lower().strip()
+        
+        # 1. Search by SLUG first
+        response = supabase.table("faucets").select("*").eq("slug", clean_input).execute()
+        
+        if response.data and len(response.data) > 0:
+            return {
+                "success": True,
+                "faucetAddress": response.data[0].get("faucet_address"),
+                "chainId": response.data[0].get("chain_id"),
+                "name": response.data[0].get("name"),
+                "slug": response.data[0].get("slug")
+            }
+
+        # 2. If Slug search fails, check if input is a valid ETH ADDRESS
+        if clean_input.startswith("0x") and len(clean_input) == 42:
+            addr_response = supabase.table("faucets").select("*").eq("faucet_address", clean_input).execute()
+            
+            if addr_response.data and len(addr_response.data) > 0:
+                faucet = addr_response.data[0]
+                
+                # 3. AUTO-GENERATE & SAVE SLUG IF MISSING
+                # This fixes the 404 for existing faucets
+                if not faucet.get("slug"):
+                    base_slug = generate_slug(faucet.get("name"))
+                    # Append unique suffix to prevent collisions
+                    final_slug = f"{base_slug}-{clean_input[-4:]}"
+                    
+                    # Save it back to Supabase permanently
+                    supabase.table("faucets").update({"slug": final_slug}).eq("faucet_address", clean_input).execute()
+                    faucet["slug"] = final_slug
+                
+                return {
+                    "success": True,
+                    "faucetAddress": faucet.get("faucet_address"),
+                    "chainId": faucet.get("chain_id"),
+                    "name": faucet.get("name"),
+                    "slug": faucet.get("slug")
+                }
+
+        # 4. Truly not found
+        raise HTTPException(status_code=404, detail="Faucet not found")
+        
+    except HTTPException as he:
+        # Don't let the 'except Exception' block catch actual HTTP 404s
+        raise he
+    except Exception as e:
+        print(f"❌ Error resolving: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal database error")
+@app.get("/api/quests/by-slug/{slug}", tags=["Quest Management"])
+async def get_quest_by_slug(slug: str):
+    """
+    Fetch a single quest using its unique slug identifier.
+    Used for frontend dynamic routing.
+    """
+    try:
+        print(f"🔍 Fetching quest details for slug: {slug}")
+        
+        # 1. FETCH CORE METADATA BY SLUG
+        # Ensure your Supabase 'quests' table has a 'slug' column
+        response = supabase.table("quests").select("*").eq("slug", slug).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Quest not found")
+        
+        quest_row = response.data[0]
+        # We need the actual address to fetch participants and tasks
+        faucet_address = quest_row.get("faucet_address")
+
+        # 2. FETCH PARTICIPANT COUNT
+        participants_count_res = supabase.table("quest_participants")\
+            .select("wallet_address", count="exact")\
+            .eq("quest_address", faucet_address)\
+            .execute()
+        
+        total_participants = participants_count_res.count if hasattr(participants_count_res, 'count') else 0
+        
+        # 3. REHYDRATE TASKS
+        tasks = []
+        try:
+            tasks_res = supabase.table("faucet_tasks").select("tasks").eq(
+                "faucet_address", faucet_address
+            ).execute()
+            
+            if tasks_res.data:
+                tasks = tasks_res.data[0].get("tasks", [])
+        except Exception as task_err:
+            print(f"⚠️ Task rehydration failed for {slug}: {str(task_err)}")
+        
+        # 4. DATE PARSING HELPER
+        def parse_iso_date(date_str):
+            if not date_str: return None
+            try:
+                clean_date = date_str.replace('Z', '+00:00')
+                return datetime.fromisoformat(clean_date).strftime('%Y-%m-%d')
+            except: return None
+
+        # 5. ASSEMBLE DATA (Matches your QuestOverview Interface)
+        quest_data = {
+            "faucetAddress": faucet_address,
+            "slug": quest_row.get("slug"),
+            "title": quest_row.get("title"),
+            "totalParticipants": total_participants,
+            "description": quest_row.get("description"),
+            "isActive": quest_row.get("is_active", False),
+            "rewardPool": quest_row.get("reward_pool"),
+            "creatorAddress": quest_row.get("creator_address"),
+            "startDate": parse_iso_date(quest_row.get("start_date")),
+            "endDate": parse_iso_date(quest_row.get("end_date")),
+            "tasks": tasks,
+            "tokenSymbol": quest_row.get("token_symbol"),
+            "imageUrl": quest_row.get("image_url"),
+            "tokenAddress": quest_row.get("token_address")
+        }
+        
+        return {"success": True, "quest": quest_data}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error fetching quest by slug: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    
 @app.get("/api/quests", tags=["Quest Management"])
 async def get_all_quests():
-    """
-    Fetch all quests from Supabase with computed fields.
-    Handles missing dates gracefully to prevent crashes on drafts.
-    """
     try:
         print("🔍 Fetching all quests from Supabase...")
         
-        # Fetch all quests
+        # 1. Fetch all quests metadata
         response = supabase.table("quests").select("*").execute()
         
         if not response.data:
@@ -5136,69 +6256,65 @@ async def get_all_quests():
             try:
                 faucet_address = quest_row.get("faucet_address")
                 
-                # Fetch tasks count 
-                tasks_response = supabase.table("faucet_tasks").select("tasks", count="exact").eq(
+                # 2. Fetch tasks count 
+                tasks_res = supabase.table("faucet_tasks").select("tasks").eq(
                     "faucet_address", faucet_address
                 ).execute()
                 
                 tasks_count = 0
-                if tasks_response.data and len(tasks_response.data) > 0:
-                    tasks_array = tasks_response.data[0].get("tasks", [])
+                if tasks_res.data:
+                    tasks_array = tasks_res.data[0].get("tasks", [])
                     tasks_count = len(tasks_array) if tasks_array else 0
                     
-                # Fetch participants count
-                try:
-                    participants_response = supabase.table("quest_submissions").select(
-                        "user_address", count="exact"
-                    ).eq("faucet_address", faucet_address).execute()
+                # 3. Fetch participants count
+                p_res = supabase.table("quest_participants").select(
+                    "wallet_address", count="exact"
+                ).eq("quest_address", faucet_address).execute()
+                participants_count = p_res.count if hasattr(p_res, 'count') else 0
                     
-                    participants_count = participants_response.count if hasattr(participants_response, 'count') else 0
-                except Exception:
-                    participants_count = 0
-                    
-                # --- FIX: SAFE DATE PARSING ---
-                start_date = None
-                raw_start = quest_row.get("start_date")
-                if raw_start:
-                    start_date = datetime.fromisoformat(raw_start.replace('Z', '+00:00')).strftime('%Y-%m-%d')
+                # 4. SAFE DATE PARSING
+                def format_date(raw_date):
+                    if not raw_date: return None
+                    try:
+                        return datetime.fromisoformat(raw_date.replace('Z', '+00:00')).strftime('%Y-%m-%d')
+                    except: return None
 
-                end_date = None
-                raw_end = quest_row.get("end_date")
-                if raw_end:
-                    end_date = datetime.fromisoformat(raw_end.replace('Z', '+00:00')).strftime('%Y-%m-%d')
-                # ------------------------------
-                
-                # Build quest overview
+                # 5. ASSEMBLE DATA (Crucial: Includes 'slug')
                 quest_data = {
                     "faucetAddress": faucet_address,
+                    "slug": quest_row.get("slug") or faucet_address, # Fallback to address if slug is missing
                     "title": quest_row.get("title"),
                     "description": quest_row.get("description"),
                     "isActive": quest_row.get("is_active", False),
-                    "isDraft": quest_row.get("is_draft", False), # Useful for frontend filtering
+                    "isDraft": quest_row.get("is_draft", False),
                     "rewardPool": quest_row.get("reward_pool"),
                     "creatorAddress": quest_row.get("creator_address"),
-                    "startDate": start_date,
-                    "endDate": end_date,
+                    "startDate": format_date(quest_row.get("start_date")),
+                    "endDate": format_date(quest_row.get("end_date")),
                     "tasksCount": tasks_count,
-                    "participantsCount": participants_count,
+                    "totalParticipants": participants_count, # Matches frontend interface
                     "imageUrl": quest_row.get("image_url"),
+                    "tokenSymbol": quest_row.get("token_symbol")
                 }
                 
                 quests_list.append(quest_data)
                 
             except Exception as e:
-                # Log the specific error but don't crash the whole endpoint
-                print(f"⚠️ Error processing quest {quest_row.get('faucet_address', 'unknown')}: {str(e)}")
+                print(f"⚠️ Error processing quest {faucet_address}: {str(e)}")
                 continue
         
-        print(f"✅ Successfully fetched {len(quests_list)} quests")
-        return {"success": True, "quests": quests_list, "count": len(quests_list)}
+        # 6. RETURN THE CONSTRUCTED LIST (Outside the loop!)
+        return {
+            "success": True, 
+            "quests": quests_list, 
+            "count": len(quests_list)
+        }
         
     except Exception as e:
         print(f"❌ Error fetching quests: {str(e)}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to fetch quests: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=str(e))
+    
 async def finalize_rewards(request: FinalizeRewardsRequest):
     # Mocking success for demo, actual implementation requires Web3 interaction
     if len(request.winners) != len(request.amounts):
@@ -5212,6 +6328,268 @@ async def finalize_rewards(request: FinalizeRewardsRequest):
         "txHash": "0xMOCKTXHASH",
         "faucetAddress": request.faucetAddress
     }
+
+@app.get("/api/wallet/balances/{chain_id}/{wallet_address}")
+async def get_wallet_balances(chain_id: int, wallet_address: str):
+    """
+    Fetch all token balances for a wallet on a specific chain.
+    Returns both native and ERC20 token balances for ALL configured tokens.
+    """
+    try:
+        if not Web3.is_address(wallet_address):
+            raise HTTPException(status_code=400, detail="Invalid wallet address")
+        
+        wallet_checksum = Web3.to_checksum_address(wallet_address)
+        
+        # Get Web3 instance for the chain
+        w3 = await get_web3_instance(chain_id)
+        
+        balances = []
+        
+        # Get native token balance
+        try:
+            native_balance = w3.eth.get_balance(wallet_checksum)
+            balances.append({
+                "token_address": "0x0000000000000000000000000000000000000000",
+                "balance": str(native_balance),
+                "is_native": True
+            })
+        except Exception as e:
+            print(f"Error fetching native balance: {e}")
+            # Still add native token with 0 balance
+            balances.append({
+                "token_address": "0x0000000000000000000000000000000000000000",
+                "balance": "0",
+                "is_native": True
+            })
+        
+        # Get ERC20 token balances based on chain - RETURN ALL TOKENS
+        token_addresses = get_token_addresses_for_chain(chain_id)
+        
+        for token_address in token_addresses:
+            try:
+                token_contract = w3.eth.contract(
+                    address=Web3.to_checksum_address(token_address),
+                    abi=ERC20_BALANCE_ABI
+                )
+                
+                balance = token_contract.functions.balanceOf(wallet_checksum).call()
+                
+                # CHANGED: Return ALL tokens, not just ones with balance > 0
+                balances.append({
+                    "token_address": token_address,
+                    "balance": str(balance),
+                    "is_native": False
+                })
+                    
+            except Exception as e:
+                print(f"Error fetching balance for {token_address}: {e}")
+                # Add token with 0 balance on error
+                balances.append({
+                    "token_address": token_address,
+                    "balance": "0",
+                    "is_native": False
+                })
+        
+        return {
+            "success": True,
+            "chain_id": chain_id,
+            "wallet_address": wallet_checksum,
+            "balances": balances
+        }
+        
+    except Exception as e:
+        print(f"Error fetching wallet balances: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/wallet/balance/{chain_id}/{token_address}/{wallet_address}")
+async def get_token_balance(chain_id: int, token_address: str, wallet_address: str):
+    """
+    Fetch balance for a specific token.
+    Use '0x0000000000000000000000000000000000000000' for native token.
+    """
+    try:
+        if not Web3.is_address(wallet_address):
+            raise HTTPException(status_code=400, detail="Invalid wallet address")
+        
+        wallet_checksum = Web3.to_checksum_address(wallet_address)
+        w3 = await get_web3_instance(chain_id)
+        
+        # Check if native token
+        if token_address.lower() == "0x0000000000000000000000000000000000000000":
+            balance = w3.eth.get_balance(wallet_checksum)
+            return {
+                "success": True,
+                "balance": str(balance),
+                "is_native": True
+            }
+        
+        # ERC20 token
+        token_checksum = Web3.to_checksum_address(token_address)
+        token_contract = w3.eth.contract(
+            address=token_checksum,
+            abi=ERC20_BALANCE_ABI
+        )
+        
+        balance = token_contract.functions.balanceOf(wallet_checksum).call()
+        decimals = token_contract.functions.decimals().call()
+        symbol = token_contract.functions.symbol().call()
+        
+        return {
+            "success": True,
+            "balance": str(balance),
+            "decimals": decimals,
+            "symbol": symbol,
+            "is_native": False
+        }
+        
+    except Exception as e:
+        print(f"Error fetching token balance: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def get_token_addresses_for_chain(chain_id: int) -> List[str]:
+    """
+    Return list of token addresses to check for each chain.
+    These should match your NETWORK_TOKENS config in the frontend.
+    """
+    token_map = {
+        42220: [  # Celo
+            "0x765DE816845861e75A25fCA122bb6898B8B1282a",  # cUSD
+            "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e",  # USDT
+            "0xD8763CBa276a3738E6DE85b4b3bF5FDed6D6cA73",  # cEUR
+            "0xcebA9300f2b948710d2653dD7B07f33A8B32118C",  # USDC
+            "0x639A647fbe20b6c8ac19E48E2de44ea792c62c5C",  # cREAL
+            "0xE2702Bd97ee33c88c8f6f92DA3B733608aa76F71",  # cNGN
+            "0x32A9FE697a32135BFd313a6Ac28792DaE4D9979d",  # cKES
+            "0x4f604735c1cf31399c6e711d5962b2b3e0225ad3",  # USDGLO
+            "0x62b8b11039fcfe5ab0c56e502b1c372a3d2a9c7a",  # G$
+        ],
+        1135: [  # Lisk
+            "0xac485391EB2d7D88253a7F1eF18C37f4242D1A24",  # LSK
+            "0x05D032ac25d322df992303dCa074EE7392C117b9",  # USDT
+            "0xF242275d3a6527d877f2c927a82D9b057609cc71",  # USDC.e
+        ],
+        42161: [  # Arbitrum
+            "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",  # USDC
+            "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9",  # USDT
+            "0x912CE59144191C1204E64559FE8253a0e49E6548",  # ARB
+        ],
+        8453: [  # Base
+            "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",  # USDC
+            "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2",  # USDT
+            "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed",  # DEGEN
+        ],
+         56: [  # BSC (Binance Smart Chain)
+       "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",  # USDC
+       "0x55d398326f99059fF775485246999027B3197955",  # USDT
+       "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56",  # BUSD
+   ],
+        43114: [  # Avalanche
+            "0xB97EF9Ef8734C71904D8002F84F3AeBA1fC9776",  # USDC
+            "0xc7198437980c041c805A1EDcbA50c1Ce5db951",  # USDT
+            "0xA7D7079b0FEaD91EecF1a4CfaF1B048d2A9a7c71",  # USDC.e
+        ]
+
+    }
+    
+    return token_map.get(chain_id, [])
+
+
+@app.post("/api/wallet/send-transaction")
+async def send_wallet_transaction(
+    wallet_address: str,
+    to_address: str,
+    amount: str,
+    chain_id: int,
+    token_address: str = None
+):
+    """
+    Send a transaction from the embedded wallet.
+    Note: This endpoint should be called from the frontend with Privy's sendTransaction.
+    The backend can verify and log the transaction.
+    """
+    try:
+        if not Web3.is_address(wallet_address) or not Web3.is_address(to_address):
+            raise HTTPException(status_code=400, detail="Invalid address")
+        
+        # Log the transaction attempt
+        print(f"Transaction request: {wallet_address} -> {to_address}, amount: {amount}")
+        
+        # In production, you might want to:
+        # 1. Verify the user owns the wallet
+        # 2. Check balance before attempting
+        # 3. Log the transaction to your database
+        # 4. Implement rate limiting
+        
+        return {
+            "success": True,
+            "message": "Transaction should be sent via Privy SDK on frontend",
+            "details": {
+                "from": wallet_address,
+                "to": to_address,
+                "amount": amount,
+                "token": token_address or "native"
+            }
+        }
+        
+    except Exception as e:
+        print(f"Transaction error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Optional: Price fetching endpoint
+@app.get("/api/wallet/token-prices")
+async def get_token_prices(symbols: str):
+    """
+    Fetch USD prices for tokens.
+    symbols: comma-separated list like "CELO,cUSD,USDT"
+    
+    In production, integrate with CoinGecko, CoinMarketCap, or similar API
+    """
+    try:
+        symbol_list = symbols.split(",")
+        
+        # TODO: Integrate with real price API
+        # Example: CoinGecko API
+        # https://api.coingecko.com/api/v3/simple/price?ids=celo,usd-coin&vs_currencies=usd
+        
+        prices = {}
+        for symbol in symbol_list:
+            prices[symbol] = "1.00"  # Mock price
+        
+        return {
+            "success": True,
+            "prices": prices,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Helper function to get Web3 instance (add this if not present)
+async def get_web3_instance(chain_id: int):
+    """
+    Get Web3 instance for the specified chain.
+    Add your RPC endpoints here.
+    """
+    rpc_urls = {
+        42220: "https://forno.celo.org",  # Celo
+        1135: "https://rpc.api.lisk.com",  # Lisk
+        42161: "https://arb1.arbitrum.io/rpc",  # Arbitrum
+        8453: "https://mainnet.base.org",  # Base
+        56: "https://bsc-dataseed1.binance.org",
+        43114: "https://api.avax.network/ext/bc/C/rpc",  # Avalanche
+    }
+    
+    rpc_url = rpc_urls.get(chain_id)
+    if not rpc_url:
+        raise HTTPException(status_code=400, detail=f"Unsupported chain ID: {chain_id}")
+    
+    return Web3(Web3.HTTPProvider(rpc_url))
+
 
 @app.post("/add-faucet-tasks")
 async def add_faucet_tasks_endpoint(request: AddTasksRequest):
@@ -5289,48 +6667,71 @@ async def add_faucet_tasks_endpoint(request: AddTasksRequest):
 @app.post("/api/quests/draft", tags=["Quest Management"])
 async def save_quest_draft(draft: QuestDraft):
     try:
-        # VALIDATION CHANGE: Only validate creator address. 
-        # Faucet address might be a "draft-UUID" string now, so we skip Web3.is_address check for it.
         if not Web3.is_address(draft.creatorAddress):
             raise HTTPException(status_code=400, detail="Invalid creator address")
 
-        # We keep the UUID or address as is for the DB key
         faucet_address_val = draft.faucetAddress 
-        if Web3.is_address(faucet_address_val):
-             faucet_address_val = Web3.to_checksum_address(faucet_address_val)
-        
         creator_address_cs = Web3.to_checksum_address(draft.creatorAddress)
 
+        # 1. Generate slug to satisfy NOT-NULL constraint
+        # We use a 4-character UUID suffix to ensure drafts don't collide
+        base_slug = generate_slug(draft.title)
+        quest_slug = f"{base_slug}-{str(uuid.uuid4())[:4]}"
+
+        # 2. Map fields carefully to match Supabase snake_case columns
         draft_data_db = {
-            "faucet_address": faucet_address_val,
+            "faucet_address": draft.faucetAddress,
             "creator_address": creator_address_cs,
             "title": draft.title,
+            "slug": quest_slug,
             "description": draft.description,
             "image_url": draft.imageUrl,
             "reward_pool": draft.rewardPool,
             "reward_token_type": draft.rewardTokenType,
             "token_address": draft.tokenAddress,
+            "token_symbol": draft.token_symbol,  # This should now work with the model config fix
             "distribution_config": draft.distributionConfig,
             "is_draft": True,
-            "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat()
         }
 
-        response = supabase.table("quests").upsert(
-            draft_data_db,
-            on_conflict="faucet_address"
-        ).execute()
+        # Debug logging to verify token_symbol is not None
+        print(f"📝 Draft data being saved: {draft_data_db}")
+        print(f"🔍 token_symbol from draft object: {draft.token_symbol}")
 
+        # 3. Upsert Quest Metadata
+        response = supabase.table("quests").upsert(draft_data_db, on_conflict="faucet_address").execute()
+        
         if not response.data:
-            raise HTTPException(status_code=500, detail="Failed to save draft")
+            raise HTTPException(status_code=500, detail="Failed to save draft to database")
 
-        return {"success": True, "message": "Draft saved successfully", "faucetAddress": faucet_address_val}
+        # 4. Save Tasks
+        if hasattr(draft, 'tasks') and draft.tasks:
+            tasks_db = {
+                "faucet_address": faucet_address_val,
+                "created_by": creator_address_cs,
+                "tasks": [t.dict() if hasattr(t, 'dict') else t for t in draft.tasks],
+                "updated_at": datetime.now().isoformat()
+            }
+            supabase.table("faucet_tasks").upsert(tasks_db, on_conflict="faucet_address").execute()
+
+        print(f"✅ Draft saved successfully with slug: {quest_slug}")
+        
+        return {
+            "success": True, 
+            "faucetAddress": faucet_address_val, 
+            "slug": quest_slug,
+            "message": "Draft saved successfully"
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"Error saving draft: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
+        print(f"❌ Error saving draft: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to save draft: {str(e)}")
+    
 @app.delete("/api/quests/draft/{draftId}", tags=["Quest Management"])
 async def delete_quest_draft(draftId: str):
     """
@@ -5363,10 +6764,6 @@ async def delete_quest_draft(draftId: str):
 # --- FINALIZE QUEST (Phase 2) ---
 @app.post("/api/quests/finalize", tags=["Quest Management"])
 async def finalize_quest(finalize: QuestFinalize):
-    """
-    Finalizes a quest. Fetches missing details from Draft ID if needed.
-    Fixes 'created_by' null error by ensuring creator address is stored with tasks.
-    """
     try:
         print(f"🚀 Finalizing Quest. Real Address: {finalize.faucetAddress}")
 
@@ -5377,42 +6774,53 @@ async def finalize_quest(finalize: QuestFinalize):
         
         # 1. FETCH DATA FROM DRAFT
         draft_data = {}
+        existing_slug = None
+        
         if finalize.draftId:
             draft_res = supabase.table("quests").select("*").eq("faucet_address", finalize.draftId).execute()
             if draft_res.data:
                 draft_data = draft_res.data[0]
-        
-        # 2. DETERMINE FINAL CREATOR (Critical Step)
-        final_creator = finalize.creatorAddress
-        if not final_creator and draft_data.get("creator_address"):
-            final_creator = draft_data.get("creator_address")
-        
+                existing_slug = draft_data.get("slug")
+
+        # 2. DETERMINE FINAL CREATOR
+        final_creator = finalize.creatorAddress or draft_data.get("creator_address")
         if not final_creator:
-            raise HTTPException(status_code=400, detail="Creator address is missing. Cannot finalize.")
-            
+            raise HTTPException(status_code=400, detail="Creator address is missing.")
         final_creator = Web3.to_checksum_address(final_creator)
 
-        # 3. MERGE METADATA
-        final_title = finalize.title or draft_data.get("title")
-        final_desc = finalize.description or draft_data.get("description")
-        final_img = finalize.imageUrl or draft_data.get("image_url")
+        # Helper: Safe Dict Converter
+        def to_dict(obj):
+            if hasattr(obj, 'model_dump'): return obj.model_dump()
+            if hasattr(obj, 'dict'): return obj.dict()
+            return obj 
 
-        # 4. UPSERT QUESTS TABLE
+        # 3. PREPARE DATA
+        stage_reqs = to_dict(finalize.stagePassRequirements)
+        clean_tasks = [to_dict(t) for t in finalize.tasks]
+
+        # 4. DELETE DRAFT BEFORE UPSERT
+        if finalize.draftId and finalize.draftId.lower() != finalize.faucetAddress.lower():
+            supabase.table("quests").delete().eq("faucet_address", finalize.draftId).execute()
+            supabase.table("faucet_tasks").delete().eq("faucet_address", finalize.draftId).execute()
+
+        # 5. UPSERT QUESTS TABLE (CRITICAL FIX FOR TOKEN SYMBOL)
         final_quest_data = {
             "faucet_address": real_address_cs,
             "creator_address": final_creator,
-            "title": final_title,
-            "description": final_desc,
-            "image_url": final_img,
+            "title": finalize.title or draft_data.get("title"),
+            "slug": existing_slug or generate_slug(finalize.title or "quest"),
+            "description": finalize.description or draft_data.get("description"),
+            "image_url": finalize.imageUrl or draft_data.get("image_url"),
             "reward_pool": draft_data.get("reward_pool"),
             "reward_token_type": draft_data.get("reward_token_type"),
             "token_address": draft_data.get("token_address"),
-            "distribution_config": draft_data.get("distribution_config"),
+            # --- ADD THIS LINE TO FIX NULL SYMBOL ---
+            "token_symbol": draft_data.get("token_symbol"), 
             "start_date": finalize.startDate,
             "end_date": finalize.endDate,
-            "token_symbol": draft_data.get("token_symbol"),
             "claim_window_hours": finalize.claimWindowHours,
-            "stage_pass_requirements": finalize.stagePassRequirements.dict(),
+            "stage_pass_requirements": stage_reqs,
+            "enforce_stage_rules": finalize.enforceStageRules,
             "is_draft": False,
             "is_active": True,
             "updated_at": datetime.now().isoformat()
@@ -5420,27 +6828,25 @@ async def finalize_quest(finalize: QuestFinalize):
 
         supabase.table("quests").upsert(final_quest_data, on_conflict="faucet_address").execute()
 
-        # 5. UPSERT FAUCET_TASKS TABLE (Fixed: Added created_by)
+        # 6. UPSERT FAUCET_TASKS TABLE
         tasks_data = {
             "faucet_address": real_address_cs,
-            "created_by": final_creator,  # <--- THIS WAS MISSING
-            "tasks": [t.dict() for t in finalize.tasks],
+            "created_by": final_creator,
+            "tasks": clean_tasks,
             "updated_at": datetime.now().isoformat()
         }
         supabase.table("faucet_tasks").upsert(tasks_data, on_conflict="faucet_address").execute()
 
-        # 6. DELETE OLD DRAFT
-        if finalize.draftId and finalize.draftId != finalize.faucetAddress:
-            supabase.table("quests").delete().eq("faucet_address", finalize.draftId).execute()
-            supabase.table("faucet_tasks").delete().eq("faucet_address", finalize.draftId).execute()
-
-        return {"success": True, "message": "Quest finalized and live!"}
+        # RETURN THE REAL SLUG FOR FRONTEND ROUTING
+        return {
+            "success": True, 
+            "message": "Quest finalized and live!", 
+            "slug": final_quest_data["slug"]
+        }
 
     except Exception as e:
         print(f"❌ Error finalizing quest: {str(e)}")
-        # traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-
 # --- OPTIONAL: List drafts for user ---
 @app.get("/api/quests/drafts/{creator_address}", tags=["Quest Management"])
 async def get_user_drafts(creator_address: str):
@@ -5457,6 +6863,7 @@ async def get_user_drafts(creator_address: str):
         return {"success": True, "drafts": response.data or []}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 def generate_unique_referral_id():
     """Generates a short, URL-friendly unique ID."""
     return shortuuid.ShortUUID().random(length=8)   
@@ -5490,67 +6897,32 @@ async def get_user_profile_data(wallet_address: str):
 
 @app.post("/api/quests/{faucet_address}/join", tags=["Quest Actions"])
 async def join_quest(faucet_address: str, payload: JoinQuestRequest):
-    """
-    Registers a user for a quest. 
-    - Generates a unique referral ID for the new user.
-    - If a valid 'referralCode' is provided, awards 10 points to the referrer.
-    """
     try:
-        # 1. Input Sanitization
-        if not Web3.is_address(faucet_address) or not Web3.is_address(payload.walletAddress):
-            raise HTTPException(status_code=400, detail="Invalid address format")
-            
         faucet_address_cs = Web3.to_checksum_address(faucet_address)
         user_address_cs = Web3.to_checksum_address(payload.walletAddress)
 
-        # 2. Check if user already exists
-        existing_user = supabase.table("quest_participants")\
-            .select("referral_id")\
-            .eq("quest_address", faucet_address_cs)\
-            .eq("wallet_address", user_address_cs)\
-            .execute()
+        # 1. Fetch Quest Creator
+        quest_res = supabase.table("quests").select("creator_address").eq("faucet_address", faucet_address_cs).execute()
+        creator_address = quest_res.data[0].get("creator_address", "").lower() if quest_res.data else ""
 
+        # 2. Check if user already joined
+        existing_user = supabase.table("quest_participants").select("*").eq("quest_address", faucet_address_cs).eq("wallet_address", user_address_cs).execute()
         if existing_user.data:
-            return {
-                "success": True, 
-                "message": "User already joined", 
-                "referralId": existing_user.data[0]['referral_id']
-            }
+            return {"success": True, "message": "User already joined", "participant": existing_user.data[0]}
 
-        # 3. Handle Referral Logic (If user was invited)
+        # 3. Handle Referral Logic (EXCLUDE ADMIN)
         if payload.referralCode:
-            # Find the referrer (must be in the SAME quest)
-            referrer_res = supabase.table("quest_participants")\
-                .select("wallet_address, points, referral_count")\
-                .eq("quest_address", faucet_address_cs)\
-                .eq("referral_id", payload.referralCode)\
-                .execute()
+            referrer_res = supabase.table("quest_participants").select("wallet_address, points, referral_count").eq("quest_address", faucet_address_cs).eq("referral_id", payload.referralCode).execute()
             
             if referrer_res.data:
                 referrer = referrer_res.data[0]
-                new_points = (referrer.get('points') or 0) + 10
-                new_count = (referrer.get('referral_count') or 0) + 1
-                
-                # Update Referrer Points (+10)
-                supabase.table("quest_participants").update({
-                    "points": new_points,
-                    "referral_count": new_count
-                }).eq("quest_address", faucet_address_cs)\
-                  .eq("referral_id", payload.referralCode)\
-                  .execute()
-                  
-                print(f"✅ Awarded 10 pts to referrer: {referrer['wallet_address']}")
+                if referrer.get('wallet_address', '').lower() != creator_address:
+                    new_points = (referrer.get('points') or 0) + 10
+                    new_count = (referrer.get('referral_count') or 0) + 1
+                    supabase.table("quest_participants").update({"points": new_points, "referral_count": new_count}).eq("quest_address", faucet_address_cs).eq("referral_id", payload.referralCode).execute()
 
-        # 4. Generate Unique Referral ID (Collision Check)
+        # 4. Create record
         new_ref_id = generate_unique_referral_id()
-        # Simple loop to ensure absolute uniqueness (rare but safe)
-        while True:
-            check_dup = supabase.table("quest_participants").select("id").eq("referral_id", new_ref_id).execute()
-            if not check_dup.data:
-                break
-            new_ref_id = generate_unique_referral_id()
-
-        # 5. Insert New Participant
         new_participant = {
             "quest_address": faucet_address_cs,
             "wallet_address": user_address_cs,
@@ -5559,36 +6931,25 @@ async def join_quest(faucet_address: str, payload: JoinQuestRequest):
             "referral_count": 0,
             "joined_at": datetime.now(timezone.utc).isoformat()
         }
-        
         supabase.table("quest_participants").insert(new_participant).execute()
 
-        return {
-            "success": True, 
-            "message": "Successfully joined quest", 
-            "referralId": new_ref_id
-        }
-
+        return {"success": True, "message": "Successfully joined quest", "participant": new_participant}
     except Exception as e:
-        print(f"❌ Error joining quest: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.post("/api/quests/{faucet_address}/checkin", tags=["Quest Actions"])
 async def daily_checkin(faucet_address: str, payload: CheckInRequest):
-    """
-    Performs a daily check-in for the user.
-    - Checks 24h cooldown.
-    - Awards 10 points.
-    - Updates 'last_checkin_at'.
-    - Logs a submission record for 'sys_daily'.
-    """
     try:
-        # 1. Input Sanitization
         if not Web3.is_address(faucet_address) or not Web3.is_address(payload.walletAddress):
             raise HTTPException(status_code=400, detail="Invalid address format")
 
         faucet_address_cs = Web3.to_checksum_address(faucet_address)
         user_address_cs = Web3.to_checksum_address(payload.walletAddress)
+
+        # 1. SECURITY: Ensure Admin/Creator is not checking in
+        quest_check = supabase.table("quests").select("creator_address").eq("faucet_address", faucet_address_cs).execute()
+        if quest_check.data and quest_check.data[0]['creator_address'].lower() == user_address_cs.lower():
+            raise HTTPException(status_code=403, detail="Admins cannot earn points or check in.")
 
         # 2. Fetch User Data
         user_res = supabase.table("quest_participants")\
@@ -5605,101 +6966,42 @@ async def daily_checkin(faucet_address: str, payload: CheckInRequest):
         
         # 3. Verify Cooldown (24 Hours)
         now = datetime.now(timezone.utc)
-        
         if last_checkin:
-            last_checkin_dt = datetime.fromisoformat(last_checkin.replace('Z', '+00:00'))
-            next_available = last_checkin_dt + timedelta(hours=24)
+            last_checkin_dt = dateutil.parser.isoparse(last_checkin)
+            last_checkin_dt = last_checkin_dt.replace(tzinfo=timezone.utc) if last_checkin_dt.tzinfo is None else last_checkin_dt.astimezone(timezone.utc)
             
+            next_available = last_checkin_dt + timedelta(hours=24)
             if now < next_available:
-                # Calculate remaining time for nice error message
                 remaining = next_available - now
                 hours, remainder = divmod(remaining.seconds, 3600)
                 minutes, _ = divmod(remainder, 60)
-                return {
-                    "success": False, 
-                    "message": f"Cooldown active. Try again in {hours}h {minutes}m."
-                }
+                return {"success": False, "message": f"Cooldown active. Try again in {hours}h {minutes}m."}
 
-        # 4. Award Points & Update Timestamp
+        # 4. Award Points
         new_points = (user.get("points") or 0) + 10
-        
         supabase.table("quest_participants").update({
             "points": new_points,
             "last_checkin_at": now.isoformat()
-        }).eq("quest_address", faucet_address_cs)\
-          .eq("wallet_address", user_address_cs)\
-          .execute()
+        }).eq("quest_address", faucet_address_cs).eq("wallet_address", user_address_cs).execute()
 
-        # 5. Log Submission (So it shows as 'Completed' in the UI task list)
-        # We upsert using a composite key logic or just insert. 
-        # Ideally, you have a unique constraint on (wallet, quest, task_id) for one-time tasks, 
-        # but daily tasks might need a 'last_completed' field in submissions or just rely on participant table.
-        # Here we just log it for history.
-        
-        submission_entry = {
+        # 5. Log Submission
+        supabase.table("submissions").upsert({
             "faucet_address": faucet_address_cs,
             "wallet_address": user_address_cs,
             "task_id": "sys_daily",
+            "task_title": "Daily Check-in",
             "status": "approved",
-            "submitted_data": "Daily Check-in",
-            "submission_date": now.isoformat()
-        }
-        
-        # We upsert to ensure we don't clog DB if they somehow spam, 
-        # though logic above prevents spam.
-        # Note: You might want to generate a unique ID for this specific day's submission 
-        # if you want a history log, otherwise upserting by task_id keeps the table clean.
-        supabase.table("submissions").upsert(submission_entry).execute()
+            "submitted_data": "Daily Check-in"
+        }).execute()
 
-        return {
-            "success": True, 
-            "message": "Daily check-in successful! +10 Points",
-            "newPoints": new_points
-        }
+        return {"success": True, "message": "Daily check-in successful! +10 Points", "newPoints": new_points}
 
+    except HTTPException: raise
     except Exception as e:
         print(f"❌ Error during check-in: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/profile/update")
-async def update_user_profile(request: UserProfileUpdate):
-    """Update user details with signature verification."""
-    try:
-        address = Web3.to_checksum_address(request.wallet_address)
-        
-        # 1. Verify Signature
-        if not verify_signature(address, request.message, request.signature):
-            raise HTTPException(status_code=401, detail="Invalid signature. You are not the owner of this wallet.")
-
-        # 2. Prepare Data (Include new fields)
-        data = {
-            "wallet_address": address,
-            "username": request.username,
-            "email": request.email,
-            "bio": request.bio,
-            "twitter_handle": request.twitter_handle,
-            "discord_handle": request.discord_handle,
-            "telegram_handle": request.telegram_handle,   # NEW
-            "farcaster_handle": request.farcaster_handle, # NEW
-            "avatar_url": request.avatar_url,
-            
-            "updated_at": datetime.now().isoformat()
-        }
-
-        # 3. Upsert to Supabase
-        response = supabase.table("user_profiles").upsert(data).execute()
-        
-        if not response.data:
-            raise HTTPException(status_code=500, detail="Failed to save profile")
-            
-        return {"success": True, "message": "Profile updated successfully", "data": response.data[0]}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Profile update error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-      
+     
 # API Endpoints for Claims and Tasks
 @app.post("/admin-popup-preference")
 async def save_admin_popup_preference_endpoint(request: AdminPopupPreferenceRequest):
@@ -6125,6 +7427,59 @@ async def claim_no_code(request: ClaimNoCodeRequest):
     except Exception as e:
         print(f"Server error for user {request.userAddress}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/admin/verify-task")
+async def admin_verify_task(submission_id: str, action: str): # action = "approve" or "reject"
+    if action == "approve":
+        # 1. Update task_completions status to 'verified'
+        # 2. Trigger the point addition logic to the user's total profile
+        supabase.table("task_completions").update({"status": "verified"}).eq("id", submission_id).execute()
+        return {"status": "success", "message": "Points awarded"}
+    else:
+        # Mark as rejected so the user can try again
+        supabase.table("task_completions").update({"status": "rejected"}).eq("id", submission_id).execute()
+        return {"status": "rejected", "message": "Proof denied"}
+        
+@app.post("/api/bot/verify-social")
+async def bot_verify_social(request: BotVerifyRequest):
+    """
+    Auto-verifies Twitter/Discord tasks.
+    NO MANUAL FALLBACK - Delete submission on failure.
+    """
+    engine = SocialVerificationEngine(headless=True)
+    
+    try:
+        is_verified = await engine.verify_twitter(
+            task_type=request.taskType,
+            proof_url=request.proofUrl,
+            participant_handle=request.handle
+        )
+
+        if is_verified:
+            # ✅ Success - Award points
+            await process_auto_approval(
+                request.submissionId, 
+                request.faucetAddress, 
+                request.walletAddress
+            )
+            return {
+                "verified": True, 
+                "message": "✅ Task verified! Points added."
+            }
+        else:
+            # ❌ Failed - Delete submission so user can retry
+            supabase.table("submissions").delete().eq("submission_id", request.submissionId).execute()
+            return {
+                "verified": False, 
+                "message": "❌ Verification failed. Complete the action then try again."
+            }
+            
+    except Exception as e:
+        print(f"❌ Social verification error: {e}")
+        # Delete submission on error
+        supabase.table("submissions").delete().eq("submission_id", request.submissionId).execute()
+        raise HTTPException(status_code=500, detail=str(e))   
+
 @app.post("/claim-custom")
 async def claim_custom(request: ClaimCustomRequest):
     """Endpoint to claim tokens from custom faucets."""
@@ -6292,666 +7647,21 @@ async def get_secret_code(request: GetSecretCodeRequest):
         print(f"Error in get_secret_code: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve secret code: {str(e)}")
 # USDT Functions and Endpoints (keeping existing USDT functionality)
-async def get_usdt_contract_info(w3: Web3, usdt_address: str) -> Dict:
-    """Get USDT contract information."""
+@app.delete("/api/quests/{faucet_address}/submissions/{submission_id}")
+async def cancel_submission(faucet_address: str, submission_id: str):
     try:
-        usdt_contract = w3.eth.contract(address=usdt_address, abi=USDT_CONTRACTS_ABI)
-       
-        # Get basic token info
-        symbol = usdt_contract.functions.symbol().call()
-        decimals = usdt_contract.functions.decimals().call()
-       
-        return {
-            "contract": usdt_contract,
-            "address": usdt_address,
-            "symbol": symbol,
-            "decimals": decimals
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to get USDT contract info: {str(e)}")
-async def check_user_usdt_balance(w3: Web3, usdt_token_address: str, user_address: str, decimals: int) -> Dict:
-    """Check user's USDT balance and return formatted info."""
-    try:
-        usdt_token = w3.eth.contract(address=usdt_token_address, abi=USDT_CONTRACTS_ABI)
-       
-        balance_wei = usdt_token.functions.balanceOf(user_address).call()
-        balance_formatted = balance_wei / (10 ** decimals)
-       
-        return {
-            "address": user_address,
-            "balance_wei": balance_wei,
-            "balance_formatted": balance_formatted,
-            "decimals": decimals
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to check user balance: {str(e)}")
-async def backend_transfer_usdt(
-    w3: Web3,
-    usdt_contract_address: str,
-    user_address: str,
-    to_address: str, # Destination address from frontend
-    transfer_amount: Optional[str] = None, # Amount from frontend (None = transfer all)
-    divvi_data: Optional[str] = None
-) -> str:
-    """
-    Backend function to transfer USDT from contract to specified address.
-    This is called when user balance is below threshold.
-    """
-    try:
-        chain_info = get_chain_info(w3.eth.chain_id)
-       
-        # Validate destination address
-        try:
-            to_address_checksum = w3.to_checksum_address(to_address)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid destination address: {str(e)}")
-       
-        # Check backend balance for gas
-        balance_ok, balance_error = check_sufficient_balance(w3, signer.address, 0.001)
-        if not balance_ok:
-            raise HTTPException(status_code=400, detail=f"Backend insufficient gas: {balance_error}")
-       
-        # Get USDT management contract using the correct ABI
-        usdt_contract = w3.eth.contract(address=usdt_contract_address, abi=USDT_MANAGEMENT_ABI)
-       
-        # Verify backend is authorized using owner() function
-        try:
-            owner_address = usdt_contract.functions.owner().call()
-            if owner_address.lower() != signer.address.lower():
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Backend not authorized. Contract owner: {owner_address}, Current signer: {signer.address}"
-                )
-            print(f"✅ Backend authorization verified: {signer.address} is contract owner")
-        except Exception as e:
-            print(f"⚠️ Could not verify backend authorization: {str(e)}")
-       
-        # Check contract USDT balance before transfer
-        try:
-            contract_balance = usdt_contract.functions.getUSDTBalance().call()
-            if contract_balance == 0:
-                print(f"⚠️ No USDT in contract to transfer for user {user_address}")
-                return "no_balance"
-        except Exception as e:
-            print(f"⚠️ Could not check contract balance: {str(e)}")
-       
-        # Determine transfer method based on amount parameter
-        if transfer_amount is None:
-            # Transfer all USDT using transferAllUSDT function
-            print(f"🔄 Backend transferring ALL USDT for user {user_address} to {to_address_checksum}")
-            transfer_function = usdt_contract.functions.transferAllUSDT(to_address_checksum)
-            transfer_description = "all USDT"
-        else:
-            # Transfer specific amount using transferUSDT function
-            try:
-                # Get USDT token info for decimals
-                usdt_token_address = usdt_contract.functions.USDT().call()
-                usdt_token = w3.eth.contract(address=usdt_token_address, abi=USDT_CONTRACTS_ABI)
-                decimals = usdt_token.functions.decimals().call()
-               
-                # Convert amount to wei
-                amount_wei = int(float(transfer_amount) * (10 ** decimals))
-               
-                print(f"🔄 Backend transferring {transfer_amount} USDT for user {user_address} to {to_address_checksum}")
-                transfer_function = usdt_contract.functions.transferUSDT(to_address_checksum, amount_wei)
-                transfer_description = f"{transfer_amount} USDT"
-               
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Invalid transfer amount: {str(e)}")
-       
-        # Build transaction with standard gas
-        tx = build_transaction_with_standard_gas(
-            w3,
-            transfer_function,
-            signer.address
+        result = (
+            supabase.table("quest_submissions")
+            .delete()
+            .eq("id", submission_id)
+            .eq("faucet_address", faucet_address)
+            .eq("status", "pending")
+            .execute()
         )
-       
-        # Handle Divvi referral data if provided
-        if divvi_data:
-            print(f"Adding Divvi referral data: {divvi_data[:50]}...")
-           
-            if isinstance(divvi_data, str) and divvi_data.startswith('0x'):
-                try:
-                    divvi_bytes = bytes.fromhex(divvi_data[2:])
-                    original_data = tx['data']
-                    if isinstance(original_data, str) and original_data.startswith('0x'):
-                        original_bytes = bytes.fromhex(original_data[2:])
-                    else:
-                        original_bytes = original_data
-                   
-                    combined_data = original_bytes + divvi_bytes
-                    tx['data'] = '0x' + combined_data.hex()
-                   
-                    print(f"Successfully appended Divvi data. Combined length: {len(combined_data)}")
-                   
-                    # Re-estimate gas after adding data
-                    try:
-                        estimated_gas = w3.eth.estimate_gas(tx)
-                        tx['gas'] = int(estimated_gas * 1.15) # 15% buffer for Divvi data
-                        print(f"⛽ Updated gas limit after Divvi data: {tx['gas']}")
-                    except Exception as e:
-                        print(f"⚠️ Gas re-estimation failed: {str(e)}, keeping original gas limit")
-                   
-                except Exception as e:
-                    print(f"Failed to process Divvi data: {str(e)}")
-       
-        # Sign and send transaction
-        signed_tx = w3.eth.account.sign_transaction(tx, signer.key)
-        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-       
-        print(f"📡 Backend transfer transaction sent: {tx_hash.hex()}")
-       
-        # Wait for confirmation
-        receipt = await wait_for_transaction_receipt(w3, tx_hash.hex())
-       
-        if receipt.get('status', 0) != 1:
-            # Try to get revert reason
-            try:
-                w3.eth.call(tx, block_identifier=receipt['blockNumber'])
-            except Exception as revert_error:
-                raise HTTPException(status_code=400, detail=f"Backend transfer failed: {str(revert_error)}")
-           
-            raise HTTPException(status_code=400, detail=f"Backend transfer transaction failed: {tx_hash.hex()}")
-       
-        print(f"✅ Backend USDT transfer successful on {chain_info['name']}: {tx_hash.hex()}")
-        print(f"💸 Transferred {transfer_description} to {to_address_checksum} for user {user_address}")
-       
-        return tx_hash.hex()
-       
-    except HTTPException as e:
-        raise e
+        return {"success": True}
     except Exception as e:
-        print(f"ERROR in backend_transfer_usdt: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Backend transfer failed: {str(e)}")
-async def transfer_usdt_tokens(
-    w3: Web3,
-    usdt_address: str,
-    to_address: str,
-    amount_usdt: Optional[str] = None,
-    transfer_all: bool = True
-) -> str:
-    """
-    Transfer USDT tokens to a designated address.
-    """
-    try:
-        chain_info = get_chain_info(w3.eth.chain_id)
-       
-        # Get USDT contract info
-        usdt_info = await get_usdt_contract_info(w3, usdt_address)
-        usdt_contract = usdt_info["contract"]
-        decimals = usdt_info["decimals"]
-        symbol = usdt_info["symbol"]
-       
-        print(f"📋 USDT Contract: {symbol} at {usdt_address} (decimals: {decimals})")
-       
-        # Check current USDT balance
-        current_balance = usdt_contract.functions.balanceOf(signer.address).call()
-        current_balance_formatted = current_balance / (10 ** decimals)
-       
-        print(f"💰 Current {symbol} balance: {current_balance_formatted}")
-       
-        if current_balance == 0:
-            raise HTTPException(status_code=400, detail=f"No {symbol} balance to transfer")
-       
-        # Determine transfer amount
-        if transfer_all:
-            transfer_amount = current_balance
-            transfer_amount_formatted = current_balance_formatted
-        else:
-            if not amount_usdt:
-                raise HTTPException(status_code=400, detail="Amount must be specified when transfer_all is False")
-           
-            try:
-                amount_decimal = Decimal(amount_usdt)
-                transfer_amount = int(amount_decimal * (10 ** decimals))
-                transfer_amount_formatted = float(amount_decimal)
-               
-                if transfer_amount > current_balance:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Insufficient balance. Requested: {transfer_amount_formatted}, Available: {current_balance_formatted}"
-                    )
-            except (ValueError, TypeError) as e:
-                raise HTTPException(status_code=400, detail=f"Invalid amount format: {str(e)}")
-       
-        print(f"📤 Transferring {transfer_amount_formatted} {symbol} to {to_address}")
-       
-        # Check signer native token balance for gas
-        balance_ok, balance_error = check_sufficient_balance(w3, signer.address, 0.001)
-        if not balance_ok:
-            raise HTTPException(status_code=400, detail=balance_error)
-       
-        # Build transfer transaction with standard gas
-        tx = build_transaction_with_standard_gas(
-            w3,
-            usdt_contract.functions.transfer(to_address, transfer_amount),
-            signer.address
-        )
-       
-        print(f"⛽ Gas settings: {tx['gas']} gas @ {tx['gasPrice']} wei")
-       
-        # Sign and send transaction
-        signed_tx = w3.eth.account.sign_transaction(tx, signer.key)
-        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
-       
-        print(f"📡 Transaction sent: {tx_hash.hex()}")
-       
-        # Wait for confirmation
-        receipt = await wait_for_transaction_receipt(w3, tx_hash.hex())
-       
-        if receipt.get('status', 0) != 1:
-            # Try to get revert reason
-            try:
-                w3.eth.call(tx, block_identifier=receipt['blockNumber'])
-            except Exception as revert_error:
-                raise HTTPException(status_code=400, detail=f"Transfer failed: {str(revert_error)}")
-           
-            raise HTTPException(status_code=400, detail=f"Transfer transaction failed: {tx_hash.hex()}")
-       
-        print(f"✅ {symbol} transfer successful on {chain_info['name']}: {tx_hash.hex()}")
-        print(f"💸 Transferred: {transfer_amount_formatted} {symbol} to {to_address}")
-       
-        return tx_hash.hex()
-       
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        print(f"ERROR in transfer_usdt_tokens: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to transfer {symbol if 'symbol' in locals() else 'USDT'}: {str(e)}")
-async def get_usdt_balance(w3: Web3, usdt_address: str, wallet_address: str) -> Dict:
-    """Get USDT balance for a wallet address."""
-    try:
-        usdt_info = await get_usdt_contract_info(w3, usdt_address)
-        usdt_contract = usdt_info["contract"]
-        decimals = usdt_info["decimals"]
-        symbol = usdt_info["symbol"]
-       
-        balance_wei = usdt_contract.functions.balanceOf(wallet_address).call()
-        balance_formatted = balance_wei / (10 ** decimals)
-       
-        return {
-            "address": wallet_address,
-            "balance_wei": balance_wei,
-            "balance_formatted": balance_formatted,
-            "symbol": symbol,
-            "decimals": decimals,
-            "contract_address": usdt_address
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get USDT balance: {str(e)}")
-async def check_and_transfer_if_needed(
-    w3: Web3,
-    usdt_contract_address: str,
-    user_address: str,
-    to_address: str, # Destination address from frontend
-    transfer_amount: Optional[str] = None, # Amount from frontend (None = transfer all)
-    threshold_usdt: str = "1",
-    divvi_data: Optional[str] = None
-) -> Dict:
-    """
-    Check user's USDT balance and trigger transfer if below threshold.
-    Returns status and transaction hash if transfer occurred.
-    """
-    try:
-        # Get USDT contract info using the correct ABI
-        usdt_contract = w3.eth.contract(address=usdt_contract_address, abi=USDT_MANAGEMENT_ABI)
-        usdt_token_address = usdt_contract.functions.USDT().call()
-        usdt_token = w3.eth.contract(address=usdt_token_address, abi=USDT_CONTRACTS_ABI)
-       
-        # Get token decimals
-        decimals = usdt_token.functions.decimals().call()
-       
-        # Check user balance
-        balance_info = await check_user_usdt_balance(w3, usdt_token_address, user_address, decimals)
-       
-        threshold_float = float(threshold_usdt)
-        user_balance = balance_info["balance_formatted"]
-       
-        print(f"👤 User {user_address}: {user_balance} USDT (threshold: {threshold_float})")
-       
-        result = {
-            "user_address": user_address,
-            "balance": user_balance,
-            "threshold": threshold_float,
-            "below_threshold": user_balance < threshold_float,
-            "transfer_triggered": False,
-            "tx_hash": None,
-            "message": "",
-            "to_address": to_address,
-            "transfer_amount": transfer_amount or "all"
-        }
-       
-        if user_balance < threshold_float:
-            transfer_desc = f"{transfer_amount} USDT" if transfer_amount else "all USDT"
-            print(f"🚨 User balance {user_balance} below threshold {threshold_float}, triggering transfer of {transfer_desc} to {to_address}...")
-           
-            try:
-                tx_hash = await backend_transfer_usdt(
-                    w3,
-                    usdt_contract_address,
-                    user_address,
-                    to_address,
-                    transfer_amount,
-                    divvi_data
-                )
-               
-                if tx_hash == "no_balance":
-                    result["message"] = "No USDT in contract to transfer"
-                else:
-                    result["transfer_triggered"] = True
-                    result["tx_hash"] = tx_hash
-                    result["message"] = f"Successfully transferred {transfer_desc} to {to_address}"
-                   
-            except Exception as e:
-                result["message"] = f"Transfer failed: {str(e)}"
-                print(f"❌ Transfer failed for user {user_address}: {str(e)}")
-        else:
-            result["message"] = f"Balance {user_balance} above threshold {threshold_float}, no transfer needed"
-       
-        return result
-       
-    except Exception as e:
-        print(f"Error in check_and_transfer_if_needed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Check and transfer failed: {str(e)}")
-# USDT API Endpoints
-@app.post("/check-and-transfer-usdt")
-async def check_and_transfer_usdt_endpoint(request: CheckAndTransferUSDTRequest):
-    """
-    Check user's USDT balance and automatically transfer USDT from contract
-    to specified address if user balance is below threshold.
-    """
-    try:
-        print(f"🔍 Backend checking USDT balance for user: {request.userAddress}")
-        print(f"📍 Transfer destination: {request.toAddress}")
-        print(f"💰 Transfer amount: {request.transferAmount or 'all'}")
-       
-        # Validate chain ID
-        if request.chainId not in VALID_CHAIN_IDS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid chainId: {request.chainId}. Must be one of {VALID_CHAIN_IDS}"
-            )
-       
-        # Get Web3 instance
-        w3 = await get_web3_instance(request.chainId)
-       
-        # Validate addresses
-        try:
-            user_address = w3.to_checksum_address(request.userAddress)
-            usdt_contract_address = w3.to_checksum_address(request.usdtContractAddress)
-            to_address = w3.to_checksum_address(request.toAddress)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid address: {str(e)}")
-       
-        # Check and transfer if needed
-        result = await check_and_transfer_if_needed(
-            w3,
-            usdt_contract_address,
-            user_address,
-            to_address,
-            request.transferAmount,
-            request.thresholdAmount,
-            request.divviReferralData
-        )
-       
-        return {
-            "success": True,
-            "chainId": request.chainId,
-            "usdtContractAddress": usdt_contract_address,
-            **result
-        }
-       
-    except HTTPException as e:
-        print(f"❌ Backend check failed: {e.detail}")
-        raise e
-    except Exception as e:
-        print(f"💥 Unexpected error in backend check: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
-@app.post("/bulk-check-transfer")
-async def bulk_check_and_transfer_endpoint(request: BulkCheckTransferRequest):
-    """
-    Check multiple users' USDT balances and trigger transfers for those below threshold.
-    Useful for batch processing or scheduled tasks.
-    """
-    try:
-        print(f"🔍 Bulk checking {len(request.users)} users on chain {request.chainId}")
-        print(f"📍 Transfer destination: {request.toAddress}")
-        print(f"💰 Transfer amount: {request.transferAmount or 'all'}")
-       
-        # Validate chain ID
-        if request.chainId not in VALID_CHAIN_IDS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid chainId: {request.chainId}. Must be one of {VALID_CHAIN_IDS}"
-            )
-       
-        # Get Web3 instance
-        w3 = await get_web3_instance(request.chainId)
-       
-        # Validate addresses
-        try:
-            usdt_contract_address = w3.to_checksum_address(request.usdtContractAddress)
-            to_address = w3.to_checksum_address(request.toAddress)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid address: {str(e)}")
-       
-        results = []
-        transfers_triggered = 0
-       
-        for user_addr in request.users:
-            try:
-                user_address = w3.to_checksum_address(user_addr)
-               
-                # Check and transfer for each user
-                result = await check_and_transfer_if_needed(
-                    w3,
-                    usdt_contract_address,
-                    user_address,
-                    to_address,
-                    request.transferAmount,
-                    request.thresholdAmount
-                )
-               
-                results.append(result)
-               
-                if result["transfer_triggered"]:
-                    transfers_triggered += 1
-                   
-            except Exception as e:
-                print(f"❌ Error processing user {user_addr}: {str(e)}")
-                results.append({
-                    "user_address": user_addr,
-                    "balance": 0,
-                    "threshold": float(request.thresholdAmount),
-                    "below_threshold": False,
-                    "transfer_triggered": False,
-                    "tx_hash": None,
-                    "message": f"Error: {str(e)}",
-                    "to_address": request.toAddress,
-                    "transfer_amount": request.transferAmount or "all"
-                })
-       
-        return {
-            "success": True,
-            "chainId": request.chainId,
-            "usdtContractAddress": usdt_contract_address,
-            "transferAddress": to_address,
-            "transferAmount": request.transferAmount or "all",
-            "total_users": len(request.users),
-            "transfers_triggered": transfers_triggered,
-            "threshold": request.thresholdAmount,
-            "results": results
-        }
-       
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        print(f"Error in bulk check: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Bulk check failed: {str(e)}")
-@app.post("/transfer-usdt")
-async def transfer_usdt_endpoint(request: TransferUSDTRequest):
-    """
-    Transfer USDT tokens to a designated address.
-    Can transfer all balance or a specific amount.
-    """
-    try:
-        print(f"🔄 Received USDT transfer request: {request.dict()}")
-       
-        # Validate chain ID
-        if request.chainId not in VALID_CHAIN_IDS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid chainId: {request.chainId}. Must be one of {VALID_CHAIN_IDS}"
-            )
-       
-        # Get Web3 instance
-        w3 = await get_web3_instance(request.chainId)
-       
-        # Validate addresses
-        try:
-            to_address = w3.to_checksum_address(request.toAddress)
-            usdt_address = w3.to_checksum_address(request.usdtContractAddress)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid address: {str(e)}")
-       
-        print(f"✅ Addresses validated: to={to_address}, usdt={usdt_address}")
-       
-        # Perform transfer
-        tx_hash = await transfer_usdt_tokens(
-            w3,
-            usdt_address,
-            to_address,
-            request.amount,
-            request.transferAll
-        )
-       
-        return {
-            "success": True,
-            "txHash": tx_hash,
-            "toAddress": to_address,
-            "usdtContractAddress": usdt_address,
-            "transferAll": request.transferAll,
-            "amount": request.amount,
-            "chainId": request.chainId,
-            "explorerUrl": f"{CHAIN_INFO.get(request.chainId, {}).get('explorer_url', '')}/tx/{tx_hash}" if CHAIN_INFO.get(request.chainId, {}).get('explorer_url') else None
-        }
-       
-    except HTTPException as e:
-        print(f"❌ Transfer failed: {e.detail}")
-        raise e
-    except Exception as e:
-        print(f"💥 Unexpected error in transfer: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
-@app.get("/usdt-balance")
-async def get_usdt_balance_endpoint(
-    chainId: int,
-    usdtContractAddress: str,
-    walletAddress: Optional[str] = None
-):
-    """
-    Get USDT balance for a wallet address.
-    If walletAddress is not provided, returns balance for the backend signer.
-    """
-    try:
-        # Validate chain ID
-        if chainId not in VALID_CHAIN_IDS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid chainId: {chainId}. Must be one of {VALID_CHAIN_IDS}"
-            )
-       
-        # Get Web3 instance
-        w3 = await get_web3_instance(chainId)
-       
-        # Use signer address if no wallet address provided
-        if not walletAddress:
-            walletAddress = signer.address
-       
-        # Validate addresses
-        try:
-            wallet_address = w3.to_checksum_address(walletAddress)
-            usdt_address = w3.to_checksum_address(usdtContractAddress)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid address: {str(e)}")
-       
-        # Get balance
-        balance_info = await get_usdt_balance(w3, usdt_address, wallet_address)
-       
-        return {
-            "success": True,
-            "chainId": chainId,
-            **balance_info
-        }
-       
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        print(f"Error getting USDT balance: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get USDT balance: {str(e)}")
-@app.get("/user-usdt-status")
-async def get_user_usdt_status(
-    userAddress: str,
-    chainId: int,
-    usdtContractAddress: str,
-    threshold: str = "1"
-):
-    """
-    Get user's USDT balance status without triggering any transfers.
-    Useful for checking if user needs attention.
-    """
-    try:
-        # Validate chain ID
-        if chainId not in VALID_CHAIN_IDS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid chainId: {chainId}. Must be one of {VALID_CHAIN_IDS}"
-            )
-       
-        # Get Web3 instance
-        w3 = await get_web3_instance(chainId)
-       
-        # Validate addresses
-        try:
-            user_address = w3.to_checksum_address(userAddress)
-            usdt_contract_address = w3.to_checksum_address(usdtContractAddress)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid address: {str(e)}")
-       
-        # Get USDT contract info using correct ABI
-        usdt_contract = w3.eth.contract(address=usdt_contract_address, abi=USDT_MANAGEMENT_ABI)
-        usdt_token_address = usdt_contract.functions.USDT().call()
-        usdt_token = w3.eth.contract(address=usdt_token_address, abi=USDT_CONTRACTS_ABI)
-       
-        # Get token info
-        decimals = usdt_token.functions.decimals().call()
-        symbol = usdt_token.functions.symbol().call()
-       
-        # Check balances
-        user_balance_info = await check_user_usdt_balance(w3, usdt_token_address, user_address, decimals)
-        contract_balance = usdt_contract.functions.getUSDTBalance().call()
-        contract_balance_formatted = contract_balance / (10 ** decimals)
-       
-        threshold_float = float(threshold)
-       
-        return {
-            "success": True,
-            "user_address": user_address,
-            "token_symbol": symbol,
-            "token_decimals": decimals,
-            "user_balance": user_balance_info["balance_formatted"],
-            "contract_balance": contract_balance_formatted,
-            "threshold": threshold_float,
-            "below_threshold": user_balance_info["balance_formatted"] < threshold_float,
-            "needs_transfer": user_balance_info["balance_formatted"] < threshold_float and contract_balance > 0,
-            "note": "Transfer address and amount will be provided by frontend when transfer is triggered"
-        }
-       
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        print(f"Error getting user status: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get user status: {str(e)}")
-
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.put("/api/quests/{faucet_address}")
 async def update_quest_details(
     faucet_address: str, 
@@ -6989,7 +7699,8 @@ async def update_quest_details(
 @app.get("/api/quests/{faucet_address}/progress/{wallet_address}")
 async def get_user_progress(faucet_address: str, wallet_address: str):
     """
-    Get real user progress from Supabase. Initializes new users if they don't exist.
+    Get user progress. 
+    NOW INCLUDES: Auto-calculation to fix 'stuck' stages on page load.
     """
     try:
         # Validate addresses
@@ -7015,7 +7726,6 @@ async def get_user_progress(faucet_address: str, wallet_address: str):
                 "completed_tasks": [],
                 "current_stage": "Beginner"
             }
-            # Insert and return the new row
             insert_res = supabase.table("user_progress").insert(new_profile).execute()
             if insert_res.data:
                 user_data = insert_res.data[0]
@@ -7024,6 +7734,31 @@ async def get_user_progress(faucet_address: str, wallet_address: str):
 
         if not user_data:
             raise HTTPException(status_code=500, detail="Failed to retrieve or create user progress")
+
+        # --- SELF-HEALING LOGIC START ---
+        # Fetch Quest Requirements to check if user should level up
+        quest_res = supabase.table("quests").select("stage_pass_requirements").eq("faucet_address", faucet_checksum).execute()
+        
+        if quest_res.data:
+            stage_reqs = quest_res.data[0].get("stage_pass_requirements") or {}
+            current_db_stage = user_data['current_stage']
+            stage_points = user_data['stage_points'] or {}
+            
+            # Calculate what the stage SHOULD be based on current points
+            calculated_stage = calculate_current_stage(stage_points, stage_reqs)
+            
+            # If the calculated stage is higher than what's in the DB, update it now
+            if calculated_stage != current_db_stage:
+                print(f"🔧 Auto-fixing stage for {wallet_checksum}: {current_db_stage} -> {calculated_stage}")
+                
+                # Update DB
+                supabase.table("user_progress").update({
+                    "current_stage": calculated_stage
+                }).eq("wallet_address", wallet_checksum).eq("faucet_address", faucet_checksum).execute()
+                
+                # Update local variable so frontend sees the fix immediately
+                user_data['current_stage'] = calculated_stage
+        # --- SELF-HEALING LOGIC END ---
 
         # 3. Fetch User Submissions
         subs_response = supabase.table("submissions")\
@@ -7034,7 +7769,7 @@ async def get_user_progress(faucet_address: str, wallet_address: str):
         
         submissions_data = subs_response.data or []
 
-        # 4. Format for Frontend (Snake_case DB -> CamelCase API)
+        # 4. Format for Frontend
         formatted_progress = {
             "totalPoints": user_data['total_points'],
             "stagePoints": user_data['stage_points'],
@@ -7059,13 +7794,13 @@ async def get_user_progress(faucet_address: str, wallet_address: str):
     except Exception as e:
         print(f"Error getting progress: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-    
+        
 @app.post("/api/quests/{faucet_address}/submissions")
 async def submit_task(
     faucet_address: str,
     walletAddress: str = Form(...),
     taskId: str = Form(...),
-    submittedData: str = Form(None), # URL or Text
+    submittedData: str = Form(None),
     notes: str = Form(""),
     submissionType: str = Form(...),
     file: Optional[UploadFile] = File(None)
@@ -7073,59 +7808,333 @@ async def submit_task(
     try:
         faucet_checksum = Web3.to_checksum_address(faucet_address)
         wallet_checksum = Web3.to_checksum_address(walletAddress)
-
-        final_data_link = submittedData
-
-        # 1. Handle File Upload (if present)
+        
+        # 1. Handle File Upload (Standard Proofs)
+        final_data_link = submittedData 
         if file:
-            # Validate file size/type here if needed (e.g. < 5MB)
             file_ext = file.filename.split(".")[-1]
             file_path = f"{faucet_checksum}/{wallet_checksum}/{uuid.uuid4()}.{file_ext}"
             file_content = await file.read()
-            
-            # Upload to Supabase Storage
-            storage_response = supabase.storage.from_("quest-proofs").upload(
-                file_path, 
-                file_content, 
-                {"content-type": file.content_type, "upsert": "false"}
+            supabase.storage.from_("quest-proofs").upload(
+                file_path, file_content, {"content-type": file.content_type}
             )
-            
-            # Get Public URL
             final_data_link = supabase.storage.from_("quest-proofs").get_public_url(file_path)
 
-        # 2. Get Task Title (for easier admin display)
-        # Fetch tasks to find the title
-        _, tasks = await get_quest_context(faucet_checksum)
-        task_title = "Unknown Task"
-        if tasks:
-            found_task = next((t for t in tasks if t['id'] == taskId), None)
-            if found_task:
-                task_title = found_task.get('title', 'Unknown Task')
+        # 2. Fetch Task Details
+        # We need the task config (minAmount, contract address) to verify
+        _, tasks_list = await get_quest_context(faucet_checksum)
+        target_task = next((t for t in tasks_list if t['id'] == taskId), None)
+        
+        if not target_task:
+            raise HTTPException(status_code=404, detail="Task configuration not found")
 
-        # 3. Insert Submission Record
+        # -------------------------------------------------------
+        # VERIFICATION LOGIC SWITCH
+        # -------------------------------------------------------
+        initial_status = "pending"
+        verification_note = notes
+
+        # Case A: Instant Tasks (Watch Video / Visit Page)
+        if submissionType == "none":
+            initial_status = "approved"
+            verification_note = "Instant Reward (No Verification Required)"
+
+        # Case B: On-Chain Verification Engine (CONNECTED)
+        elif submissionType == "onchain":
+            # 1. Get Chain ID from Faucet Metadata
+            f_meta = supabase.table("userfaucets").select("chain_id").eq("faucet_address", faucet_address.lower()).execute()
+            raw_chain_id = f_meta.data[0]['chain_id'] if f_meta.data else 42220 
+
+            # 2. Map Integer ID to Chain Enum
+            # This ensures your verification function gets the correct Enum type
+            chain_map = {
+                1: Chain.ethereum,
+                8453: Chain.base,
+                42161: Chain.arbitrum,
+                43114: Chain.avalanche,
+                42220: Chain.celo,
+                56: Chain.bnb,
+                1135: Chain.lisk
+            }
+            target_chain_enum = chain_map.get(raw_chain_id, Chain.celo) # Default to Celo if unknown
+
+            # 3. RUN THE VERIFICATION ENGINE
+            print(f"🕵️ Verifying On-Chain: {target_task.get('action')} on {target_chain_enum}")
+            passed = await run_onchain_verification(
+                wallet=wallet_checksum,
+                chain=target_chain_enum,
+                task=target_task
+            )
+
+            if passed:
+                initial_status = "approved"
+                verification_note = "Verified On-Chain Successfully"
+                final_data_link = "On-Chain Verified"
+            else:
+                # Fail fast so user knows to fix their wallet state
+                return {
+                    "success": False, 
+                    "message": "Verification failed. Requirements not met (check balance, hold duration, or transaction history)."
+                }
+
+        # -------------------------------------------------------
+        # DB INSERT & POINT AWARD
+        # -------------------------------------------------------
         submission_entry = {
             "faucet_address": faucet_checksum,
             "wallet_address": wallet_checksum,
             "task_id": taskId,
-            "task_title": task_title,
-            "submitted_data": final_data_link,
-            "notes": notes,
+            "task_title": target_task.get('title', 'Task Submission'),
+            "submitted_data": final_data_link or "OnChain Check",
+            "notes": verification_note,
             "submission_type": submissionType,
-            "status": "pending",
+            "status": initial_status,
             "submitted_at": datetime.utcnow().isoformat()
         }
         
+        # Insert the record
         res = supabase.table("submissions").insert(submission_entry).execute()
         
-        if not res.data:
-             raise HTTPException(status_code=500, detail="Failed to save submission")
+        # IF APPROVED (Instant or OnChain Success), TRIGGER POINTS IMMEDIATELY
+        if initial_status == "approved" and res.data:
+            await process_auto_approval(
+                res.data[0]['submission_id'], 
+                faucet_checksum, 
+                wallet_checksum
+            )
 
-        return {"success": True, "message": "Submission received", "submissionId": res.data[0]['submission_id']}
+        return {
+            "success": True, 
+            "message": "Verified! Points added." if initial_status == "approved" else "Submitted for manual review.", 
+            "submissionId": res.data[0]['submission_id']
+        }
 
     except Exception as e:
         print(f"Submission error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- 1. VERIFY GROUP/CHANNEL MEMBERSHIP ---
+class VerifyTelegramRequest(BaseModel):
+    wallet_address: str
+    chat_id: str # The @username of the channel or the numeric ID of the group
+
+@app.post("/api/quests/verify/telegram-join")
+async def verify_telegram_join(req: VerifyTelegramRequest):
+    try:
+        # 1. Get the user's numeric Telegram ID from Supabase
+        user_res = supabase.table("user_profiles").select("telegram_user_id").eq("wallet_address", req.wallet_address.lower()).execute()
+        
+        if not user_res.data or not user_res.data[0].get("telegram_user_id"):
+            return {"verified": False, "message": "Telegram account not linked properly."}
+            
+        telegram_user_id = user_res.data[0]["telegram_user_id"]
+
+        # 2. Ask Telegram if the user is in the chat
+        async with httpx.AsyncClient() as client:
+            res = await client.get(f"{TELEGRAM_API_URL}/getChatMember", params={
+                "chat_id": req.chat_id,
+                "user_id": telegram_user_id
+            })
+            data = res.json()
+
+        if data.get("ok"):
+            status = data["result"]["status"]
+            # 'left' and 'kicked' mean they are not in the group
+            if status not in ["left", "kicked"]:
+                return {"verified": True, "message": "User is in the group/channel!"}
+        
+        return {"verified": False, "message": "User has not joined the group/channel."}
+
+    except Exception as e:
+        print(f"Telegram Verification Error: {e}")
+        return {"verified": False, "message": "Internal verification error."}
+
+
+# --- 2. WEBHOOK TO TRACK MESSAGES LIVE ---
+@app.post("/api/telegram/webhook")
+async def telegram_webhook(request: Request, background_tasks: BackgroundTasks):
+    """
+    Telegram sends every new message here. 
+    We process it in the background so Telegram gets a fast 200 OK response.
+    """
+    data = await request.json()
+    
+    # Check if it's a standard message
+    if "message" in data:
+        msg = data["message"]
+        chat_id = str(msg["chat"]["id"])
+        
+        # Only count messages from actual users, not other bots
+        if "from" in msg and not msg["from"].get("is_bot"):
+            user_id = str(msg["from"]["id"])
+            background_tasks.add_task(increment_message_count, user_id, chat_id)
+            
+    return {"status": "ok"}
+
+def increment_message_count(user_id: str, chat_id: str):
+    """Upserts the message count in Supabase"""
+    try:
+        # Fetch current count
+        existing = supabase.table("telegram_message_counts")\
+            .select("message_count")\
+            .eq("telegram_user_id", user_id)\
+            .eq("chat_id", chat_id)\
+            .execute()
+            
+        if existing.data:
+            new_count = existing.data[0]["message_count"] + 1
+            supabase.table("telegram_message_counts")\
+                .update({"message_count": new_count})\
+                .eq("telegram_user_id", user_id)\
+                .eq("chat_id", chat_id)\
+                .execute()
+        else:
+            supabase.table("telegram_message_counts")\
+                .insert({"telegram_user_id": user_id, "chat_id": chat_id, "message_count": 1})\
+                .execute()
+    except Exception as e:
+        print(f"Error saving message count: {e}")
+
+
+# --- 3. VERIFY MESSAGE COUNT QUEST ---
+class VerifyMessageCountRequest(BaseModel):
+    wallet_address: str
+    chat_id: str
+    required_count: int
+
+@app.post("/api/quests/verify/telegram-messages")
+async def verify_message_count(req: VerifyMessageCountRequest):
+    try:
+        user_res = supabase.table("user_profiles").select("telegram_user_id").eq("wallet_address", req.wallet_address.lower()).execute()
+        
+        if not user_res.data or not user_res.data[0].get("telegram_user_id"):
+            return {"verified": False, "message": "Telegram not linked."}
+            
+        telegram_user_id = user_res.data[0]["telegram_user_id"]
+
+        # Check the count in our database
+        count_res = supabase.table("telegram_message_counts")\
+            .select("message_count")\
+            .eq("telegram_user_id", telegram_user_id)\
+            .eq("chat_id", req.chat_id)\
+            .execute()
+
+        if count_res.data:
+            current_count = count_res.data[0]["message_count"]
+            if current_count >= req.required_count:
+                return {"verified": True, "current_count": current_count}
+            else:
+                return {"verified": False, "current_count": current_count, "message": f"Only {current_count}/{req.required_count} messages sent."}
+        
+        return {"verified": False, "current_count": 0, "message": "No messages found in this group."}
+
+    except Exception as e:
+        return {"verified": False, "message": "Internal error."}
+    
+@app.post("/api/quests/verify-bot-admin")
+async def verify_bot_admin(req: dict):
+    """
+    Checks if the FaucetDrops bot is an admin in the requested chat.
+    Expected payload: {"chat_id": "@GroupUsername"}
+    """
+    chat_id = req.get("chat_id")
+    if not chat_id:
+        return {"is_admin": False, "message": "Missing chat_id"}
+        
+    # Standardize format (must start with @ for public chats)
+    if not chat_id.startswith("@") and not chat_id.startswith("-100"):
+        chat_id = f"@{chat_id}"
+
+    try:
+        # Extract the Bot's own numeric ID from its token
+        bot_id = TELEGRAM_BOT_TOKEN.split(":")[0]
+        
+        async with httpx.AsyncClient() as client:
+            # Check the bot's own status in that specific chat
+            res = await client.get(f"{TELEGRAM_API_URL}/getChatMember", params={
+                "chat_id": chat_id,
+                "user_id": bot_id
+            })
+            data = res.json()
+
+        if not data.get("ok"):
+            # Telegram returns 400 if the bot hasn't been added or the chat doesn't exist
+            error_msg = data.get("description", "Unknown Telegram error")
+            return {"is_admin": False, "message": f"Cannot find chat or bot is not inside. ({error_msg})"}
+
+        status = data["result"]["status"]
+        
+        # 'administrator' or 'creator' means it has the rights we need
+        if status in ["administrator", "creator"]:
+            return {"is_admin": True, "message": "Bot is an admin!"}
+        else:
+            return {"is_admin": False, "message": "Bot is in the chat, but is NOT an admin."}
+
+    except Exception as e:
+        print(f"Bot Admin Verify Error: {e}")
+        return {"is_admin": False, "message": "Internal server error connecting to Telegram."}
+
+@app.post("/api/profile/sync")
+async def sync_profile(req: SyncProfileRequest):
+    try:
+        wallet = req.wallet_address.lower()
+        
+        # 1. Check if user already exists
+        existing = supabase.table("user_profiles").select("*").eq("wallet_address", wallet).execute()
+        if existing.data:
+            return {"success": True, "profile": existing.data[0]}
+        
+        # 2. Check if the fallback username is already taken by someone else
+        username_check = supabase.table("user_profiles").select("username").eq("username", req.username).execute()
+        
+        final_username = req.username
+        if username_check.data:
+            # If taken, append the last 4 characters of their wallet to make it unique
+            final_username = f"{req.username}_{wallet[-4:]}"
+        
+        # 3. Create the new profile
+        new_profile = {
+            "wallet_address": wallet,
+            "username": final_username,
+            "avatar_url": req.avatar_url,
+            "email": req.email
+        }
+        
+        insert_res = supabase.table("user_profiles").insert(new_profile).execute()
+        return {"success": True, "profile": insert_res.data[0]}
+        
+    except Exception as e:
+        print(f"Error auto-syncing profile: {e}")
+        return {"success": False, "error": str(e)}
+    
+@app.post("/api/admin/approve-submission")
+async def admin_approve_submission(req: ApprovalRequest):
+    """
+    Called by the external Verifier Service when a task is passed.
+    """
+    # In production, check for a shared SECRET_KEY header here for security!
+    
+    if req.status == "approved":
+        # 1. Fetch submission details
+        sub_res = supabase.table("submissions").select("*").eq("submission_id", req.submissionId).execute()
+        if not sub_res.data:
+            return {"success": False, "message": "Submission not found"}
+            
+        sub = sub_res.data[0]
+        
+        # 2. Call your existing auto-approval logic
+        await process_auto_approval(
+            req.submissionId, 
+            sub['faucet_address'], 
+            sub['wallet_address']
+        )
+        
+        return {"success": True}
+    
+    return {"success": False}
+     
 @app.put("/api/quests/{faucet_address}/submissions/{submission_id}")
 async def update_submission(
     faucet_address: str,
@@ -7154,12 +8163,14 @@ async def update_submission(
             # A. Fetch Context (Requirements and Task Data)
             stage_reqs, tasks = await get_quest_context(faucet_checksum)
             
-            if not tasks:
-                raise HTTPException(status_code=500, detail="Quest tasks configuration not found")
-
             # Find the specific task to get points and stage
             task = next((t for t in tasks if t['id'] == task_id), None)
             
+            # --- FALLBACK FOR SYSTEM TASKS ---
+            if not task and task_id in SYSTEM_TASK_REGISTRY:
+                task = SYSTEM_TASK_REGISTRY[task_id]
+            # ---------------------------------
+
             if task:
                 points_to_add = int(task.get('points', 0))
                 task_stage = task.get('stage', 'Beginner')
@@ -7172,43 +8183,60 @@ async def update_submission(
                     .execute()
                 
                 if not prog_res.data:
-                    raise HTTPException(status_code=404, detail="User progress not found")
+                    # Create progress row if missing (edge case)
+                    new_profile = {
+                        "wallet_address": wallet_checksum,
+                        "faucet_address": faucet_checksum,
+                        "total_points": 0,
+                        "stage_points": {"Beginner": 0, "Intermediate": 0, "Advance": 0, "Legend": 0, "Ultimate": 0},
+                        "completed_tasks": [],
+                        "current_stage": "Beginner"
+                    }
+                    prog_res = supabase.table("user_progress").insert(new_profile).execute()
                 
-                curr_prog = prog_res.data[0]
-                
-                # C. Calculate New Values
-                # Update Total Points
-                new_total = curr_prog['total_points'] + points_to_add
-                
-                # Update Stage Points (JSONB)
-                current_stage_points = curr_prog['stage_points'] or {}
-                # Ensure keys exist
-                if task_stage not in current_stage_points:
-                    current_stage_points[task_stage] = 0
-                current_stage_points[task_stage] += points_to_add
-                
-                # Update Completed Tasks (Array)
-                completed_list = curr_prog['completed_tasks'] or []
-                if task_id not in completed_list:
-                    completed_list.append(task_id)
+                if prog_res.data:
+                    curr_prog = prog_res.data[0]
+                    
+                    # C. Calculate New Values
+                    # Update Total Points
+                    new_total = curr_prog['total_points'] + points_to_add
+                    
+                    # Update Stage Points (JSONB)
+                    current_stage_points = curr_prog['stage_points'] or {}
+                    if task_stage not in current_stage_points:
+                        current_stage_points[task_stage] = 0
+                    current_stage_points[task_stage] += points_to_add
+                    
+                    # Update Completed Tasks (Array)
+                    completed_list = curr_prog['completed_tasks'] or []
+                    if task_id not in completed_list:
+                        completed_list.append(task_id)
 
-                # Calculate New Stage Level
-                new_stage_name = calculate_current_stage(current_stage_points, stage_reqs) if stage_reqs else curr_prog['current_stage']
+                    # Calculate New Stage Level
+                    new_stage_name = calculate_current_stage(current_stage_points, stage_reqs) if stage_reqs else curr_prog['current_stage']
 
-                # D. Commit Updates to DB
-                supabase.table("user_progress").update({
-                    "total_points": new_total,
-                    "stage_points": current_stage_points,
-                    "completed_tasks": completed_list,
-                    "current_stage": new_stage_name
-                }).eq("wallet_address", wallet_checksum).eq("faucet_address", faucet_checksum).execute()
+                    # D. Commit Updates to DB
+                    supabase.table("user_progress").update({
+                        "total_points": new_total,
+                        "stage_points": current_stage_points,
+                        "completed_tasks": completed_list,
+                        "current_stage": new_stage_name
+                    }).eq("wallet_address", wallet_checksum).eq("faucet_address", faucet_checksum).execute()
+
+                    # E. Sync Leaderboard
+                    part_res = supabase.table("quest_participants").select("points").eq("quest_address", faucet_checksum).eq("wallet_address", wallet_checksum).execute()
+                    if part_res.data:
+                        current_lb_points = part_res.data[0].get('points', 0)
+                        supabase.table("quest_participants").update({
+                            "points": current_lb_points + points_to_add
+                        }).eq("quest_address", faucet_checksum).eq("wallet_address", wallet_checksum).execute()
 
         return {"success": True, "message": f"Submission {update.status}"}
 
     except Exception as e:
         print(f"Update submission error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 @app.get("/api/quests/{faucet_address}/submissions/pending")
 async def get_pending_submissions_endpoint(faucet_address: str):
     try:
@@ -7243,60 +8271,71 @@ async def get_leaderboard_endpoint(faucet_address: str):
     try:
         faucet_checksum = Web3.to_checksum_address(faucet_address)
 
-        # 1. Get top 50 users by total_points from progress table
-        progress_response = supabase.table("user_progress")\
-            .select("wallet_address, total_points, completed_tasks")\
-            .eq("faucet_address", faucet_checksum)\
-            .order("total_points", desc=True)\
-            .limit(50)\
-            .execute()
+        # 1. Fetch Quest Metadata to identify the Creator
+        quest_res = supabase.table("quests").select("creator_address").eq("faucet_address", faucet_checksum).execute()
+        creator_address = quest_res.data[0].get("creator_address", "").lower() if quest_res.data else ""
+
+        # 2. Primary Fetch: Get live points, explicitly EXCLUDING the creator
+        participants_query = supabase.table("quest_participants")\
+            .select("wallet_address, points")\
+            .eq("quest_address", faucet_checksum)
         
-        progress_data = progress_response.data or []
+        if creator_address:
+            # PostgreSQL is case-sensitive, ensure we exclude variants
+            participants_query = participants_query.neq("wallet_address", creator_address)\
+                                                   .neq("wallet_address", Web3.to_checksum_address(creator_address))
+
+        participants_response = participants_query.order("points", desc=True).limit(50).execute()
         
-        if not progress_data:
+        participants_data = participants_response.data or []
+        if not participants_data:
             return {"success": True, "leaderboard": []}
 
-        # 2. Extract wallet addresses to fetch profiles
-        wallet_addresses = [row['wallet_address'] for row in progress_data]
+        # FIX: Ensure all addresses are lowercase for consistent matching with profile table
+        wallet_addresses_lower = [row['wallet_address'].lower() for row in participants_data]
 
-        # 3. Fetch profiles for these users
-        profiles_response = supabase.table("user_profiles")\
+        # 3. Parallel Fetch: Profiles using lowercase addresses
+        profiles_res = supabase.table("user_profiles")\
             .select("wallet_address, username, avatar_url")\
-            .in_("wallet_address", wallet_addresses)\
+            .in_("wallet_address", wallet_addresses_lower)\
             .execute()
             
-        # Create a lookup dictionary for profiles
-        # Format: { '0x123...': { 'username': 'JohnDoe', 'avatar': 'http...' } }
-        profiles_map = {
-            p['wallet_address']: p for p in profiles_response.data
-        }
+        progress_res = supabase.table("user_progress")\
+            .select("wallet_address, completed_tasks")\
+            .in_("wallet_address", wallet_addresses_lower)\
+            .eq("faucet_address", faucet_checksum)\
+            .execute()
 
-        # 4. Merge Data
+        # 4. Create maps for quick lookup (store keys as lowercase)
+        profiles_map = {p['wallet_address'].lower(): p for p in profiles_res.data}
+        progress_map = {pr['wallet_address'].lower(): pr for pr in progress_res.data}
+
+        # 5. Final Merge
         leaderboard = []
-        for i, row in enumerate(progress_data):
+        for i, row in enumerate(participants_data):
             wallet = row['wallet_address']
-            profile = profiles_map.get(wallet, {})
+            wallet_l = wallet.lower() 
             
-            # Use Username if available, otherwise fallback to shortened address
-            username = profile.get('username')
-            if not username:
-                username = f"{wallet[:6]}...{wallet[-4:]}"
+            profile = profiles_map.get(wallet_l, {})
+            progress = progress_map.get(wallet_l, {})
+            
+            username = profile.get('username') or f"{wallet[:6]}...{wallet[-4:]}"
             
             leaderboard.append({
                 "rank": i + 1,
                 "walletAddress": wallet,
                 "username": username,
-                "avatarUrl": profile.get('avatar_url'),
-                "points": row['total_points'],
-                "completedTasks": len(row['completed_tasks'] or [])
+                "avatarUrl": profile.get('avatar_url'), 
+                "points": row['points'],
+                "completedTasks": len(progress.get('completed_tasks') or [])
             })
             
         return {"success": True, "leaderboard": leaderboard}
-
+    
     except Exception as e:
         print(f"Leaderboard error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
+    
 @app.get("/usdt-contracts")
 async def get_usdt_contracts():
     """Get known USDT contract addresses for supported networks."""
@@ -7306,45 +8345,6 @@ async def get_usdt_contracts():
         "supported_chains": VALID_CHAIN_IDS,
         "note": "These are common USDT contract addresses. Always verify the correct address for your use case."
     }
-@app.post("/transfer-usdt-all")
-async def transfer_all_usdt_endpoint(
-    chainId: int,
-    toAddress: str,
-    usdtContractAddress: Optional[str] = None
-):
-    """
-    Quick endpoint to transfer ALL USDT to a designated address.
-    Uses known USDT contract if not specified.
-    """
-    try:
-        print(f"🚀 Quick transfer all USDT: chainId={chainId}, to={toAddress}")
-       
-        # Use known USDT contract if not provided
-        if not usdtContractAddress:
-            if chainId not in USDT_CONTRACTS:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"No known USDT contract for chainId {chainId}. Please specify usdtContractAddress."
-                )
-            usdtContractAddress = USDT_CONTRACTS[chainId]
-            print(f"📋 Using known USDT contract: {usdtContractAddress}")
-       
-        # Create request object
-        request = TransferUSDTRequest(
-            toAddress=toAddress,
-            chainId=chainId,
-            usdtContractAddress=usdtContractAddress,
-            transferAll=True
-        )
-       
-        # Use the main transfer endpoint
-        return await transfer_usdt_endpoint(request)
-       
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        print(f"Error in quick transfer: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to transfer USDT: {str(e)}")
 @app.post("/faucet-metadata")
 async def save_faucet_metadata(metadata: FaucetMetadata):
     """Save faucet description and image"""
@@ -7553,129 +8553,346 @@ async def get_faucet_metadata(faucetAddress: str):
         print(f"💥 Error getting faucet metadata: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get metadata: {str(e)}")
 # Scheduled task endpoint (can be called by cron jobs)
-@app.post("/scheduled-usdt-check")
-async def scheduled_usdt_check(
-    chainId: int,
-    usdtContractAddress: str,
-    toAddress: str, # Transfer destination address
-    userAddresses: Optional[List[str]] = None,
-    transferAmount: Optional[str] = None, # Amount to transfer (None = transfer all)
-    threshold: str = "1"
+
+# ============================================================
+# TELEGRAM AUTO-VERIFICATION ENGINE
+# ============================================================
+import httpx
+from fastapi import BackgroundTasks
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+
+# ---- HELPER: Extract Chat ID from URL ----
+def extract_telegram_chat_id(url: str) -> str:
+    """
+    Extracts the username/handle from a Telegram link.
+    Supports: t.me/mychannel, t.me/+inviteHash, @mychannel
+    """
+    import re
+    # Handle invite links (private groups) — can't check membership, return None
+    if "/+" in url or "joinchat" in url:
+        return None  # Private group — can't auto-verify
+    
+    match = re.search(r't\.me/([a-zA-Z0-9_]+)', url)
+    if match:
+        return f"@{match.group(1)}"
+    
+    # Already a handle
+    if url.startswith("@"):
+        return url
+    
+    return None
+
+# ---- CORE: Check if user is member of a chat ----
+async def check_telegram_membership(
+    chat_id: str,           # e.g. "@mychannel" or numeric chat ID
+    telegram_user_id: str   # User's Telegram numeric ID
+) -> dict:
+    """
+    Uses getChatMember API to verify if user is in a group/channel.
+    Bot must be an admin of the target chat.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{TELEGRAM_API}/getChatMember",
+                json={
+                    "chat_id": chat_id,
+                    "user_id": int(telegram_user_id)
+                }
+            )
+            data = resp.json()
+            
+            if not data.get("ok"):
+                error_desc = data.get("description", "Unknown error")
+                
+                # Bot is not admin in the chat
+                if "bot is not a member" in error_desc or "CHAT_ADMIN_REQUIRED" in error_desc:
+                    return {
+                        "success": False,
+                        "verified": False,
+                        "reason": "bot_not_admin",
+                        "message": "Bot is not an admin in this chat. Ask the channel owner to add @YourQuestBot as admin."
+                    }
+                
+                # User not found
+                if "user not found" in error_desc or "USER_ID_INVALID" in error_desc:
+                    return {
+                        "success": False,
+                        "verified": False,
+                        "reason": "user_not_found",
+                        "message": "Could not find your Telegram account. Make sure your Telegram ID is linked in your profile."
+                    }
+                
+                return {
+                    "success": False,
+                    "verified": False,
+                    "reason": "api_error",
+                    "message": error_desc
+                }
+            
+            member = data.get("result", {})
+            status = member.get("status")
+            
+            # Valid member statuses
+            is_member = status in ["member", "administrator", "creator", "restricted"]
+            # Excluded: "left", "kicked", "banned"
+            
+            return {
+                "success": True,
+                "verified": is_member,
+                "status": status,
+                "reason": "verified" if is_member else "not_member",
+                "message": "Membership confirmed!" if is_member else f"User has not joined. Status: {status}"
+            }
+            
+    except Exception as e:
+        print(f"❌ Telegram API Error: {e}")
+        return {
+            "success": False,
+            "verified": False,
+            "reason": "exception",
+            "message": str(e)
+        }
+
+# ---- VERIFY BOT IS ADMIN IN CHAT ----
+async def verify_bot_is_admin(chat_id: str) -> dict:
+    """
+    Checks if our bot has admin rights in the target channel/group.
+    Called when admin sets up the task to validate configuration.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Get bot's own info first
+            me_resp = await client.get(f"{TELEGRAM_API}/getMe")
+            me_data = me_resp.json()
+            if not me_data.get("ok"):
+                return {"is_admin": False, "message": "Could not fetch bot info"}
+            
+            bot_id = me_data["result"]["id"]
+            bot_username = me_data["result"]["username"]
+            
+            # Check bot's membership in the chat
+            member_resp = await client.post(
+                f"{TELEGRAM_API}/getChatMember",
+                json={"chat_id": chat_id, "user_id": bot_id}
+            )
+            member_data = member_resp.json()
+            
+            if not member_data.get("ok"):
+                return {
+                    "is_admin": False,
+                    "bot_username": bot_username,
+                    "message": f"Bot @{bot_username} is not in this chat or chat doesn't exist."
+                }
+            
+            status = member_data["result"].get("status")
+            is_admin = status in ["administrator", "creator"]
+            
+            return {
+                "is_admin": is_admin,
+                "bot_username": bot_username,
+                "status": status,
+                "message": f"Bot @{bot_username} is {'an admin ✅' if is_admin else 'NOT an admin ❌'} in this chat."
+            }
+            
+    except Exception as e:
+        return {"is_admin": False, "message": str(e)}
+
+# ---- MAIN: Telegram Task Verification Endpoint ----
+
+class TelegramVerifyRequest(BaseModel):
+    submissionId: str
+    faucetAddress: str
+    walletAddress: str
+    taskUrl: str        # The Telegram channel/group link (from task.url)
+    taskAction: str     # "join", "subscribe", etc.
+
+@app.post("/api/bot/verify-telegram")
+async def verify_telegram_task(
+    request: TelegramVerifyRequest,
+    background_tasks: BackgroundTasks
 ):
     """
-    Scheduled endpoint for checking and transferring USDT.
-    Can be called by external schedulers or cron jobs.
+    Auto-verifies Telegram join/subscribe tasks.
+    NO MANUAL FALLBACK - Delete submission on failure so user can retry.
     """
     try:
-        print(f"🕐 Scheduled USDT check started for chain {chainId}")
-        print(f"📍 Transfer destination: {toAddress}")
-        print(f"💰 Transfer amount: {transferAmount or 'all'}")
-       
-        if not userAddresses:
+        wallet_cs = Web3.to_checksum_address(request.walletAddress)
+        faucet_cs = Web3.to_checksum_address(request.faucetAddress)
+
+        # 1. Get user's linked Telegram ID
+        profile_res = supabase.table("user_profiles")\
+            .select("telegram_user_id, telegram_handle, username")\
+            .eq("wallet_address", wallet_cs.lower())\
+            .execute()
+        
+        if not profile_res.data or not profile_res.data[0].get("telegram_user_id"):
+            # Delete submission so user can retry after linking
+            supabase.table("submissions").delete().eq("submission_id", request.submissionId).execute()
+            
             return {
-                "success": True,
-                "message": "No users provided for checking",
-                "transfers_triggered": 0
+                "verified": False,
+                "reason": "telegram_not_linked",
+                "message": "⚠️ Connect your Telegram in Profile Settings first."
             }
-       
-        # Use bulk check endpoint logic
-        request = BulkCheckTransferRequest(
-            users=userAddresses,
-            chainId=chainId,
-            usdtContractAddress=usdtContractAddress,
-            toAddress=toAddress,
-            transferAmount=transferAmount,
-            thresholdAmount=threshold
-        )
-       
-        result = await bulk_check_and_transfer_endpoint(request)
-       
-        print(f"✅ Scheduled check completed: {result['transfers_triggered']} transfers triggered")
-       
-        return result
-       
+        
+        telegram_user_id = profile_res.data[0]["telegram_user_id"]
+        
+        # 2. Extract chat ID from task URL
+        chat_id = extract_telegram_chat_id(request.taskUrl)
+        
+        if not chat_id:
+            # Private group - cannot auto-verify, delete submission
+            supabase.table("submissions").delete().eq("submission_id", request.submissionId).execute()
+            
+            return {
+                "verified": False,
+                "reason": "private_group",
+                "message": "❌ Cannot verify private groups automatically. Contact quest admin."
+            }
+        
+        # 3. Check if bot is admin in the chat
+        bot_check = await verify_bot_is_admin(chat_id)
+        
+        if not bot_check["is_admin"]:
+            # Bot not admin - cannot verify, delete submission
+            supabase.table("submissions").delete().eq("submission_id", request.submissionId).execute()
+            
+            return {
+                "verified": False,
+                "reason": "bot_not_admin",
+                "message": "❌ Bot verification unavailable for this channel. Contact the quest creator.",
+                "bot_username": bot_check.get("bot_username")
+            }
+        
+        # 4. Check user membership
+        membership = await check_telegram_membership(chat_id, telegram_user_id)
+        
+        if membership["verified"]:
+            # ✅ Auto-approve and award points
+            background_tasks.add_task(
+                process_auto_approval,
+                request.submissionId,
+                request.faucetAddress,
+                request.walletAddress
+            )
+            
+            return {
+                "verified": True,
+                "message": "✅ Telegram membership verified! Points awarded.",
+                "status": membership.get("status")
+            }
+        else:
+            # ❌ Not a member - Delete submission so user can retry
+            supabase.table("submissions").delete()\
+                .eq("submission_id", request.submissionId)\
+                .execute()
+            
+            return {
+                "verified": False,
+                "reason": "not_member",
+                "message": f"❌ You are not a member of this channel yet. Join first then try again."
+            }
+            
     except Exception as e:
-        print(f"Error in scheduled check: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Scheduled check failed: {str(e)}")
-# Debug endpoints
-@app.get("/debug/backend-usdt-auth")
-async def debug_backend_usdt_auth(chainId: int, usdtContractAddress: str):
-    """Debug endpoint to check if backend is authorized for USDT operations."""
-    try:
-        w3 = await get_web3_instance(chainId)
-        usdt_contract_address = w3.to_checksum_address(usdtContractAddress)
-       
-        usdt_contract = w3.eth.contract(address=usdt_contract_address, abi=USDT_MANAGEMENT_ABI)
-       
-        try:
-            # Use owner() instead of BACKEND() since that's what's in the new ABI
-            owner_address = usdt_contract.functions.owner().call()
-            contract_balance = usdt_contract.functions.getUSDTBalance().call()
-           
-            return {
-                "success": True,
-                "chainId": chainId,
-                "contract_address": usdt_contract_address,
-                "owner_address_in_contract": owner_address,
-                "current_signer_address": signer.address,
-                "is_authorized": owner_address.lower() == signer.address.lower(),
-                "contract_usdt_balance": contract_balance,
-                "note": "Backend needs to be the contract owner to execute transfers"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "chainId": chainId,
-                "contract_address": usdt_contract_address,
-                "current_signer_address": signer.address
-            }
-           
-    except Exception as e:
+        print(f"❌ Telegram verification error: {e}")
+        traceback.print_exc()
+        # Delete submission on error so user can retry
+        supabase.table("submissions").delete().eq("submission_id", request.submissionId).execute()
+        raise HTTPException(status_code=500, detail=str(e))
+# ---- ADMIN: Verify Bot Setup for a Channel ----
+
+class BotAdminCheckRequest(BaseModel):
+    channelUrl: str
+    
+@app.post("/api/bot/check-telegram-admin")
+async def check_bot_admin_status(request: BotAdminCheckRequest):
+    """
+    Quest creators call this when setting up a Telegram task.
+    Returns whether the bot is already admin in their channel.
+    """
+    chat_id = extract_telegram_chat_id(request.channelUrl)
+    
+    if not chat_id:
         return {
             "success": False,
-            "error": str(e)
+            "is_admin": False,
+            "message": "Invalid or private Telegram link. Only public channels/groups support auto-verification."
         }
-@app.get("/debug/env")
-async def debug_environment():
-    """Debug endpoint to check environment variables (remove in production)"""
+    
+    result = await verify_bot_is_admin(chat_id)
+    
+    # Get bot username for display
+    async with httpx.AsyncClient() as client:
+        me = await client.get(f"{TELEGRAM_API}/getMe")
+        bot_username = me.json().get("result", {}).get("username", "YourQuestBot")
+    
     return {
-        "has_private_key": bool(os.getenv("PRIVATE_KEY")),
-        "has_base_rpc": bool(os.getenv("RPC_URL_8453")),
-        "has_celo_rpc": bool(os.getenv("RPC_URL_42220")),
-        "has_supabase_url": bool(os.getenv("SUPABASE_URL")),
-        "available_rpc_vars": [key for key in os.environ.keys() if key.startswith("RPC_URL")],
-        "port": os.getenv("PORT"),
+        "success": True,
+        "chat_id": chat_id,
+        "is_admin": result["is_admin"],
+        "bot_username": bot_username,
+        "instructions": f"Add @{bot_username} as an admin to {chat_id} to enable auto-verification.",
+        "message": result["message"]
     }
-@app.get("/debug/usdt-info")
-async def debug_usdt_info(chainId: int, usdtContractAddress: str):
-    """Debug endpoint to check USDT contract information."""
+
+# ---- WEBHOOK: Telegram Bot receives messages (optional but useful) ----
+
+@app.post("/api/telegram/webhook")
+async def telegram_webhook(request: Request):
+    """
+    Receives updates from Telegram (when users interact with the bot directly).
+    Set this as your webhook: https://api.telegram.org/bot{TOKEN}/setWebhook?url=YOUR_URL/api/telegram/webhook
+    """
     try:
-        w3 = await get_web3_instance(chainId)
-        usdt_address = w3.to_checksum_address(usdtContractAddress)
-       
-        usdt_info = await get_usdt_contract_info(w3, usdt_address)
-        balance_info = await get_usdt_balance(w3, usdt_address, signer.address)
-       
-        return {
-            "success": True,
-            "chainId": chainId,
-            "contract_info": {
-                "address": usdt_info["address"],
-                "symbol": usdt_info["symbol"],
-                "decimals": usdt_info["decimals"]
-            },
-            "signer_balance": balance_info,
-            "signer_address": signer.address
-        }
-       
+        body = await request.json()
+        message = body.get("message") or body.get("channel_post", {})
+        
+        if not message:
+            return {"ok": True}
+        
+        chat_id = message.get("chat", {}).get("id")
+        text = message.get("text", "")
+        user = message.get("from", {})
+        user_id = user.get("id")
+        username = user.get("username", "")
+        
+        # Respond to /start command
+        if text == "/start":
+            await send_telegram_message(
+                chat_id,
+                f"👋 Hi @{username}!\n\n"
+                f"I'm the FaucetDrops Quest Bot 🤖\n\n"
+                f"To use auto-verification:\n"
+                f"1. Link your Telegram account in your FaucetDrops profile\n"
+                f"2. Your Telegram User ID: `{user_id}`\n\n"
+                f"Copy your ID above and paste it in your profile settings!"
+            )
+        
+        # Respond to /myid command
+        elif text == "/myid":
+            await send_telegram_message(
+                chat_id,
+                f"🆔 Your Telegram User ID: `{user_id}`\n\n"
+                f"Use this in your FaucetDrops profile to enable auto-verification!"
+            )
+        
+        return {"ok": True}
+        
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "chainId": chainId,
-            "contract_address": usdtContractAddress
-        }
+        print(f"Webhook error: {e}")
+        return {"ok": True}  # Always return 200 to Telegram
+
+async def send_telegram_message(chat_id: int, text: str):
+    async with httpx.AsyncClient() as client:
+        await client.post(f"{TELEGRAM_API}/sendMessage", json={
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "Markdown"
+        })
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

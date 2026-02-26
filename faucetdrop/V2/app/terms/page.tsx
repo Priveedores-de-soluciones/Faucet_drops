@@ -34,7 +34,7 @@ export default function TermsPage() {
               <section className="mb-8">
                 <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-4">1. Introduction</h2>
                 <p className="text-slate-700 dark:text-slate-300 mb-4">
-                  Welcome to FaucetDrops, a platform for creating and managing token drops and faucets for contests, private airdrops, community rewards, and restricted campaigns ("Service"). By accessing or using our website at faucetdrops.io or any associated services, you agree to be bound by these Terms and Conditions ("Terms"). These Terms form a legally binding agreement between you ("User" or "you") and FaucetDrops ("we," "us," or "our"). If you do not agree, please do not use our Service.
+                  Welcome to FaucetDrops, a platform for creating and managing token drops and faucets for contests, private airdrops, community rewards, and restricted campaigns ("Service"). By accessing or using our website at FaucetDrops.io or any associated services, you agree to be bound by these Terms and Conditions ("Terms"). These Terms form a legally binding agreement between you ("User" or "you") and FaucetDrops ("we," "us," or "our"). If you do not agree, please do not use our Service.
                 </p>
               </section>
 

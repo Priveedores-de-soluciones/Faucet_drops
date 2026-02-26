@@ -1,35 +1,29 @@
-# Project-specific files
+# --- Authentication & Sessions (CRITICAL) ---
+bot_browser_data/
+src/bot_browser_data/
+temp_browser_profile/
+twitter_auth.json
+*.auth/
+
+# --- Environment & Secrets ---
 .env
+venv/
+env/
+.venv/
+
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-.installed.cfg
-*.egg
 
-# Virtual environments
-venv/
-myenv/
-ENV/
-env/
-
-# IDEs and editors
-.idea/
+# --- IDEs & OS ---
 .vscode/
-*.swp
-*.swo
-*~
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Logs & Debugging ---
+*.log
+debug_fail_*.pngsrc/twitter_auth.json
+src/twitter_auth.json

@@ -152,7 +152,7 @@ export async function getFaucetDetailsFromFactory(
 }
 
 // Helper function to detect faucet type by trying different ABIs
-async function detectFaucetType(provider: BrowserProvider | JsonRpcProvider, faucetAddress: string): Promise<FaucetType> {
+export async function detectFaucetType(provider: BrowserProvider | JsonRpcProvider, faucetAddress: string): Promise<FaucetType> {
   const faucetTypes: FaucetType[] = ['dropcode', 'droplist', 'custom']
   
   for (const type of faucetTypes) {

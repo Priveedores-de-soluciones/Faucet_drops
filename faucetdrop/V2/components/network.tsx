@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 // Assuming useWallet and useNetwork are imported correctly
 import { useWallet } from "@/hooks/use-wallet"; 
 import { useNetwork } from "@/hooks/use-network"; 
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Search, Loader2, Zap, AlertTriangle } from "lucide-react";
 import Link from "next/link";
@@ -60,7 +60,7 @@ export function NetworkGrid({ className = "" }: NetworkGridProps) {
   // Assuming useWallet returns both chainId and the JsonRpcProvider
   const { chainId, provider } = useWallet(); 
   const { networks } = useNetwork();
-  const { toast } = useToast();
+ 
 
   const [networkStatus, setNetworkStatus] = useState<
     Record<string, { loading: boolean; error: string | null }>
@@ -136,11 +136,7 @@ export function NetworkGrid({ className = "" }: NetworkGridProps) {
             newCounts[network.name] = 0;
             newActiveCounts[network.name] = 0;
 
-            toast({
-              title: `Connection Error on ${network.name}`,
-              description: errorMessage,
-              variant: "destructive",
-            });
+            toast.error(`Connection Error on ${network.name}`);
           }
         })
       );

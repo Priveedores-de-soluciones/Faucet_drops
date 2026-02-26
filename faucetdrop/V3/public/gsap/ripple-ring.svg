@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" id="rippleSVG" width="200" height="200" viewBox="0 0 200 200">
+                <defs>
+                    <filter id="glow">
+                        <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+                        <feMerge>
+                            <feMergeNode in="coloredBlur"/>
+                            <feMergeNode in="SourceGraphic"/>
+                        </feMerge>
+                    </filter>
+                </defs>
+                <circle cx="100" cy="100" r="60" fill="none" stroke="#0052ff" stroke-width="6" opacity="0.8" filter="url(#glow)"/>
+            </svg>

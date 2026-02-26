@@ -3,37 +3,7 @@
 import Link from 'next/link';
 import { siX, siGithub, siTelegram, siGmail, siYoutube } from 'simple-icons/icons'
 import Image from 'next/image';
-
-interface IconProps {
-  path: string;
-  title?: string;
-}
-
-interface SimpleIconProps {
-  icon: IconProps;
-  size?: number | string;
-  className?: string;
-}
-
-const SimpleIcon: React.FC<SimpleIconProps> = ({ 
-  icon, 
-  size = 24, 
-  className = 'text-white' 
-}) => {
-  return (
-    <svg
-      role="img"
-      viewBox="0 0 24 24"
-      width={size}
-      height={size}
-      className={className}
-      fill="currentColor"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <path d={icon.path} />
-    </svg>
-  );
-};
+import { SimpleIcon } from './ui/simpleIcons';
 
 const Footer = () => {
 
@@ -41,8 +11,8 @@ const Footer = () => {
     {
       title: 'Product',
       links: [
-        { name: 'Faucets', href: '/coming-soon' },
-        { name: 'Quests', href: '/coming-soon' },
+        { name: 'Faucets', href: 'https://app.faucetdrops.io/faucet/create-faucet', external: true },
+        { name: 'Quests', href: '/quest', external: false },
         { name: 'Quizzes', href: '/coming-soon' },
         { name: 'Enterprise', href: '/coming-soon' },
       ],
@@ -50,7 +20,7 @@ const Footer = () => {
     {
       title: 'Company',
       links: [
-        { name: 'About Us', href: '/coming-soon' },
+        { name: 'About Us', href: '/aboutUs' },
         { name: 'Careers', href: '/coming-soon' },
         { name: 'Blog', href: '/coming-soon' },
         { name: 'Press', href: '/coming-soon' },
@@ -61,7 +31,7 @@ const Footer = () => {
       links: [
         { name: 'Documentation', href: '/coming-soon' },
         { name: 'Guides', href: '/coming-soon' },
-        { name: 'API Status', href: '/coming-soon' },
+        // { name: 'API Status', href: '/coming-soon' },
         { name: 'Help Center', href: '/coming-soon' },
       ],
     },
@@ -141,13 +111,13 @@ const Footer = () => {
             &copy; {new Date().getFullYear()} FaucetDrops. All rights reserved.
           </p>
           <div className="flex flex-wrap justify-center md:justify-end gap-4 mt-4 md:mt-0">
-            <Link href="/privacy" className="text-sm hover:text-[#2563EB] transition-colors">
+            <Link href="/legal/privacy" className="text-sm hover:text-[#2563EB] transition-colors">
               Privacy Policy
             </Link>
-            <Link href="/terms" className="text-sm hover:text-[#2563EB] transition-colors">
+            <Link href="/legal/terms" className="text-sm hover:text-[#2563EB] transition-colors">
               Terms of Service
             </Link>
-            <Link href="/cookie-policy" className="text-sm hover:text-[#2563EB] transition-colors">
+            <Link href="/legal/cookie-policy" className="text-sm hover:text-[#2563EB] transition-colors">
               Cookie Policy
             </Link>
           </div>

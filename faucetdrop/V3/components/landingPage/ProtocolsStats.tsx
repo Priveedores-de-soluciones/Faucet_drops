@@ -169,7 +169,7 @@ export default function ProtocolsStats() {
             viewport={{ once: true }}
             transition={{ delay: 0.4 }}
           >
-            Companies like Celo, Lisk, & Self Protocol use Faucet Drops to drive Onchain Growth at scale.
+            Companies like Celo, Lisk, & Self Protocol use FaucetDrops to drive Onchain Growth at scale.
           </motion.p>
           
           {/* Animated underline */}

@@ -513,9 +513,7 @@ export function TransactionsPerDayChart() {
                 <Activity className="h-5 w-5" style={{ color: network.color }} />
                 <div>
                   <h3 className="font-semibold">{network.name}</h3>
-                  <p className="text-xs text-muted-foreground">
-                    {network.factoryAddresses.length} factories
-                  </p>
+                  
                 </div>
               </div>
               <div className="text-right">

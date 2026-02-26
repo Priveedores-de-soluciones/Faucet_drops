@@ -1,74 +1,74 @@
-'use client';
-
-import { useRef, ReactNode } from 'react';
-import * as anime from 'animejs';
+// components/MagneticButton.tsx
+'use client'
+import { useRef, useEffect } from 'react';
+import gsap from 'gsap';
 
 interface MagneticButtonProps {
-  children: ReactNode;
-  onClick?: () => void;
+  children: React.ReactNode;
   className?: string;
-  strength?: number;
+  onClick?: () => void;
 }
 
-export default function MagneticButton({ 
+const MagneticButton: React.FC<MagneticButtonProps> = ({ 
   children, 
-  onClick, 
   className = '', 
-  strength = 0.3 
-}: MagneticButtonProps) {
+  onClick 
+}) => {
   const buttonRef = useRef<HTMLButtonElement>(null);
+  const magneticRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLButtonElement>) => {
+  useEffect(() => {
     const button = buttonRef.current;
     if (!button) return;
 
-    const rect = button.getBoundingClientRect();
-    const x = e.clientX - rect.left - rect.width / 2;
-    const y = e.clientY - rect.top - rect.height / 2;
+    const handleMouseMove = (e: MouseEvent) => {
+      const rect = button.getBoundingClientRect();
+      const x = e.clientX - rect.left - rect.width / 2;
+      const y = e.clientY - rect.top - rect.height / 2;
+      
+      const distance = Math.sqrt(x * x + y * y);
+      const maxDistance = 100;
+      
+      if (distance < maxDistance) {
+        const strength = 0.3;
+        magneticRef.current = { x: x * strength, y: y * strength };
+        
+        gsap.to(button, {
+          x: magneticRef.current.x,
+          y: magneticRef.current.y,
+          duration: 0.3,
+          ease: 'power2.out'
+        });
+      }
+    };
 
-    anime.animate(button, {
-      translateX: x * strength,
-      translateY: y * strength,
-      duration: 300,
-      easing: 'easeOutCubic',
-    });
-  };
+    const handleMouseLeave = () => {
+      gsap.to(button, {
+        x: 0,
+        y: 0,
+        duration: 0.5,
+        ease: 'elastic.out(1, 0.5)'
+      });
+    };
 
-  const handleMouseLeave = () => {
-    const button = buttonRef.current;
-    if (!button) return;
+    window.addEventListener('mousemove', handleMouseMove);
+    button.addEventListener('mouseleave', handleMouseLeave);
 
-    anime.animate(button, {
-      translateX: 0,
-      translateY: 0,
-      duration: 500,
-      easing: 'easeOutElastic(1, .6)',
-    });
-  };
-
-  const handleClick = () => {
-    const button = buttonRef.current;
-    if (!button) return;
-
-    // Ripple effect
-    anime.animate(button, {
-      scale: [1, 0.95, 1],
-      duration: 400,
-      easing: 'easeOutElastic(1, .5)',
-    });
-
-    onClick?.();
-  };
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      button.removeEventListener('mouseleave', handleMouseLeave);
+    };
+  }, []);
 
   return (
-    <button
-      ref={buttonRef}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={handleMouseLeave}
-      onClick={handleClick}
+    <button 
+      ref={buttonRef} 
+      onClick={onClick}
       className={className}
     >
       {children}
     </button>
   );
-}
+};
+
+export default MagneticButton;

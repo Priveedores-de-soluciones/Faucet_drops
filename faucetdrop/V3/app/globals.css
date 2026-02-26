@@ -225,7 +225,7 @@
 }
 
 /* Hide default cursor on desktop */
-@media (min-width: 768px) {
+/* @media (min-width: 768px) {
   * {
     cursor: none !important;
   }
@@ -233,4 +233,4 @@
   button, a, input, textarea, select {
     cursor: none !important;
   }
-}
+} */

@@ -4,10 +4,9 @@
 import { Alert } from "@/components/ui/alert"
 import { useState, useEffect, useCallback, useMemo, Suspense } from "react"
 import { useWallet } from "@/hooks/use-wallet"
-import { useNetwork, isFactoryTypeAvailable, getFactoryAddress } from "@/hooks/use-network"
-import { useAppKitAccount, useAppKitNetwork } from '@reown/appkit/react'
+import { useNetwork, isFactoryTypeAvailable } from "@/hooks/use-network"
 import { useChainId } from 'wagmi'
-import { useToast } from "@/hooks/use-toast"
+import { toast } from "sonner"
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   createFaucet,
@@ -68,7 +67,7 @@ import { zeroAddress, isAddress } from "viem"
 import LoadingPage from "@/components/loading"
 
 // --- TYPES ---
-interface TokenConfiguration {
+export interface TokenConfiguration {
   address: string
   name: string
   symbol: string
@@ -284,7 +283,7 @@ const FAUCET_TYPE_TO_FACTORY_TYPE_MAPPING: Record<FaucetType, FactoryType> = {
 
 const SUPPORTED_CHAIN_IDS = [42220, 1135, 42161, 8453] as const
 
-const NETWORK_TOKENS: Record<number, TokenConfiguration[]> = {
+export const NETWORK_TOKENS: Record<number, TokenConfiguration[]> = {
   // Celo Mainnet (42220)
   42220: [
     {
@@ -489,6 +488,78 @@ const NETWORK_TOKENS: Record<number, TokenConfiguration[]> = {
       description: "Degen community token",
     },
   ],
+  
+  56:[
+    {
+      address: zeroAddress,
+      name: "BNB",
+      symbol: "BNB",
+      decimals: 18,
+      isNative: true,
+      logoUrl: "/bnb.jpg", 
+      description: "Native BNB for transaction fees",
+    },
+    {
+      address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+      name: "USD Coin",
+      symbol: "USDC",
+      decimals: 18, // USDC on BSC is usually 18 decimals (Bridged)
+      logoUrl: "/busdc.jpg", 
+      description: "Binance-Peg USD Coin",
+    },
+    {
+      address: "0x55d398326f99059fF775485246999027B3197955",
+      name: "Tether USD",
+      symbol: "USDT",
+      decimals: 18,
+      logoUrl: "/busd.jpg", 
+      description: "Binance-Peg BSC-USD",
+    },
+    {
+      address: "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56",
+      name: "BUSD",
+      symbol: "BUSD",
+      decimals: 18,
+      logoUrl: "/busdt.jpg", 
+      description: "Binance-Peg BUSD Token",
+    },
+],
+
+  43114: [
+    {
+      address: zeroAddress,
+      name: "Avalanche",
+      symbol: "AVAX",
+      decimals: 18,
+      isNative: true,
+      logoUrl: "/avax.svg", 
+      description: "Native Avalanche for transaction fees",
+    },
+    {
+      address: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
+      name: "USD Coin",
+      symbol: "USDC",
+      decimals: 6,
+      logoUrl: "/usdc.jpg", 
+      description: "USD Coin on Avalanche",
+    },
+    {
+      address: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7",
+      name: "Tether USD",
+      symbol: "USDT",
+      decimals: 6,
+      logoUrl: "/usdt.jpg",
+      description: "Tether USD on Avalanche",
+    },
+    {
+      address: "0xdD8bC0b33ca3EA16CA2C7eBf971B8a92A3B2F306",
+      name: "Agora",
+      symbol: "AGR",
+      decimals: 18,
+      logoUrl: "/ago.png", 
+      description: "Agora community token on Avalanche",
+    }
+  ],
 }
 
 const FAUCET_USE_CASE_TEMPLATES: Record<FaucetType, Array<{
@@ -559,15 +630,18 @@ interface CreateFaucetProps {
 // MAIN WIZARD COMPONENT
 // ----------------------------------------------------------------------------------
 export default function CreateFaucetWizard({ onSuccess, closeModal }: CreateFaucetProps) {
-  const { provider, connect } = useWallet()
   const { network, getFactoryAddress, networks } = useNetwork()
-  const { address, isConnected } = useAppKitAccount()
-  const chainId = useChainId()
-  const { chainId: appKitChainId } = useAppKitNetwork()
-  const { toast } = useToast()
+  const { 
+    address, 
+    isConnected, 
+    chainId: walletChainId, 
+    connect, 
+    provider 
+  } = useWallet();
+
   const router = useRouter()
   const searchParams = useSearchParams()
-  const effectiveChainId = (chainId || appKitChainId) as number
+  const effectiveChainId = walletChainId;
     
   const currentNetwork = useMemo(() => {
     if (!effectiveChainId) return null
@@ -667,20 +741,12 @@ export default function CreateFaucetWizard({ onSuccess, closeModal }: CreateFauc
     if (!file) return
 
     if (!file.type.startsWith('image/')) {
-      toast({
-        title: "Invalid File Type",
-        description: "Please select an image file (PNG, JPG, GIF, etc.)",
-        variant: "destructive",
-      })
+      toast.error("Invalid File Type. Please select an image file.")
       return
     }
 
     if (file.size > 5 * 1024 * 1024) {
-      toast({
-        title: "File Too Large",
-        description: "Please select an image smaller than 5MB",
-        variant: "destructive",
-      })
+      toast.error("File Too Large. Please select an image smaller than 5MB")
       return
     }
 
@@ -690,16 +756,9 @@ export default function CreateFaucetWizard({ onSuccess, closeModal }: CreateFauc
     try {
       const uploadedUrl = await uploadImageToServer(file)
       setFaucetImageUrl(uploadedUrl)
-      toast({
-        title: "Image Uploaded Successfully",
-        description: "Your faucet image has been uploaded",
-      })
+      toast.success("Image uploaded successfully")
     } catch (error) {
-      toast({
-        title: "Upload Failed",
-        description: "Failed to upload image. Please try again.",
-        variant: "destructive",
-      })
+      toast.error("Image upload failed. Please try again.")
       setSelectedImageFile(null)
     } finally {
       setIsUploadingImage(false)
@@ -740,11 +799,7 @@ export default function CreateFaucetWizard({ onSuccess, closeModal }: CreateFauc
         
     } catch (error: any) {
       console.error('❌ Error saving faucet metadata:', error)
-      toast({
-        title: "Warning",
-        description: "Faucet created but metadata failed to save. You can add it later.",
-        variant: "default",
-      })
+      toast.warning("Faucet created, but failed to save metadata. You can update it later in the dashboard.")
     }
   }
 
@@ -893,11 +948,7 @@ export default function CreateFaucetWizard({ onSuccess, closeModal }: CreateFauc
     } catch (error: any) {
       console.error('❌ Error registering faucet in backend:', error)
       // We don't block the UI here, just log/toast warning, as the on-chain faucet is already created
-      toast({
-        title: "Database Sync Warning",
-        description: "Faucet created on-chain, but failed to register in dashboard. It may not appear in your list immediately.",
-        variant: "default", // or "destructive" if you prefer
-      })
+      toast.error("Faucet created on-chain, but failed to register in dashboard. It may not appear in your list immediately.")
     }
   }
   // Name validation
@@ -1051,11 +1102,7 @@ export default function CreateFaucetWizard({ onSuccess, closeModal }: CreateFauc
     setCreationError(null)
     if (wizardState.selectedFaucetType && !isFaucetTypeAvailableOnNetwork(wizardState.selectedFaucetType as FaucetType)) {
       setWizardState(prev => ({ ...prev, selectedFaucetType: '' }))
-      toast({
-        title: "Faucet Type Unavailable",
-        description: `${wizardState.selectedFaucetType} faucets are not available on ${matchedNetwork.name}`,
-        variant: "destructive",
-      })
+      toast.warning(`Selected faucet type is not available on ${matchedNetwork.name}. Please choose another type.`)
     }
   }, [effectiveChainId, networks, wizardState.selectedFaucetType, toast])
 
@@ -1112,11 +1159,7 @@ export default function CreateFaucetWizard({ onSuccess, closeModal }: CreateFauc
   const selectFaucetType = (type: FaucetType) => {
     if (!isFaucetTypeAvailableOnNetwork(type)) {
       console.warn(`❌ Cannot select ${type} - not available on current network`)
-      toast({
-        title: "Faucet Type Unavailable",
-        description: `${type} faucets are not available on chain ${effectiveChainId}`,
-        variant: "destructive",
-      })
+      toast.warning(`The selected faucet type is not available on the current network. Please choose another type.`)
       return
     }
     console.log(`✅ Selected faucet type: ${type}`)
@@ -1288,10 +1331,7 @@ export default function CreateFaucetWizard({ onSuccess, closeModal }: CreateFauc
       )
 
       const selectedToken = getSelectedTokenConfiguration()
-      toast({
-        title: "Faucet Created Successfully! 🎉",
-        description: `Your ${selectedToken?.symbol || "token"} faucet (${mappedFactoryType}) has been created at ${createdFaucetAddress}`,
-      })
+      toast.success(`Faucet "${wizardState.formData.faucetName}" created successfully! Dispensing ${selectedToken ? selectedToken.symbol : 'tokens'}.`)
 
       // -------------------------------------------------------------
       // IMPORTANT: TRIGGER THE DASHBOARD REFRESH HERE
@@ -1316,10 +1356,8 @@ export default function CreateFaucetWizard({ onSuccess, closeModal }: CreateFauc
     } catch (error: any) {
       console.error("❌ Error creating faucet:", error)
       let errorMessage = error.message || "Failed to create faucet"
-      toast({
-        title: "Failed to create faucet",
+      toast.error("Failed to create faucet", {
         description: errorMessage,
-        variant: "destructive",
       })
       setCreationError(errorMessage)
     } finally {
@@ -1550,15 +1588,16 @@ export default function CreateFaucetWizard({ onSuccess, closeModal }: CreateFauc
             </AlertDescription>
           </Alert>
         )}
-        {isConnected && (networks.find((net) => net.chainId === chainId)?.chainId !== appKitChainId) && (
-          <Alert className="border-red-500 bg-red-50 dark:bg-red-900/20">
-            <AlertTriangle className="h-4 w-4 text-red-600" />
-            <AlertTitle className="text-red-700 dark:text-red-300">Wrong Network Selected</AlertTitle>
-            <AlertDescription className="text-red-700 dark:text-red-300">
-              Please switch to a supported network to create a faucet.
-            </AlertDescription>
-          </Alert>
-        )}
+        {isConnected && !currentNetwork && (
+  <Alert className="border-red-500 bg-red-50 dark:bg-red-900/20">
+    <AlertTriangle className="h-4 w-4 text-red-600" />
+    <AlertTitle className="text-red-700 dark:text-red-300">Wrong Network Selected</AlertTitle>
+    <AlertDescription className="text-red-700 dark:text-red-300">
+      The current network (Chain ID: {effectiveChainId}) is not supported. 
+      Please switch to Celo, Lisk, Arbitrum, or Base.
+    </AlertDescription>
+  </Alert>
+)}
         {unavailableTypes.length > 0 && network && (
           <Alert className="border-orange-500 bg-orange-50 dark:bg-orange-900/20">
             <AlertTriangle className="h-4 w-4 text-orange-600" />
@@ -2038,7 +2077,7 @@ export default function CreateFaucetWizard({ onSuccess, closeModal }: CreateFauc
           <p className="text-xs text-muted-foreground">
             {faucetImageUrl.trim() || selectedImageFile
               ? "Custom image will be used"
-              : "If left empty, the FaucetDrop logo will be used"
+              : "If left empty, the FaucetDrops logo will be used"
             }
           </p>
 
@@ -2055,11 +2094,7 @@ export default function CreateFaucetWizard({ onSuccess, closeModal }: CreateFauc
                 className="max-h-40 rounded object-contain mx-auto"
                 onError={() => {
                   if (faucetImageUrl) {
-                    toast({
-                      title: "Invalid Image",
-                      description: "The image cannot be loaded. Default will be used.",
-                      variant: "destructive",
-                    })
+                    toast.error("The image cannot be loaded. Default will be useding a file.")
                   }
                 }}
               />

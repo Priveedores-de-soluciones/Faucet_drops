@@ -29,7 +29,7 @@ const messages = [
   },
   {
     type: 'receiver',
-    text: 'Faucet Drops gives you everything you need to distribute rewards safely, transparently, and at scale.',
+    text: 'FaucetDrops gives you everything you need to distribute rewards safely, transparently, and at scale.',
     sender: 'FaucetDrops Team',
     avatar: '/favicon.png',
     delay: 3.5

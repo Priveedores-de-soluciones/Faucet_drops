@@ -63,7 +63,7 @@ const Header = () => {
       {
         name: 'Company',
         dropdown: [
-          { name: 'About', href: '/coming-soon', icon: <Info />, description: 'Learn more about our company' },
+          { name: 'About', href: '/aboutUs', icon: <Info />, description: 'Learn more about our company' },
           { name: 'Career', href: '/coming-soon', icon: <Briefcase />, description: 'Explore career opportunities' },
           { name: 'Brand kit', href: '/coming-soon', icon: <PaintRoller />, description: 'Download our brand kit' },
           // ref: '/company/about' // path to follow
@@ -72,7 +72,7 @@ const Header = () => {
     ];
 
   return (
-    <header className="fixed w-full z-50 transition-colors duration-300 text-white mx-auto max-w-full px-0 max-md:bg-[#020817]/80 max-md:backdrop-blur-sm">
+    <header className="fixed w-full z-100 transition-colors bg-[#030712]/90 duration-300 text-white mx-auto max-w-full px-0 max-md:bg-[#020817]/80 max-md:backdrop-blur-sm">
       <div className="container mx-auto px-4 py-3">
         <div className="flex items-center justify-between">
           {/* Logo */}

@@ -2,16 +2,16 @@
 import React from "react";
 import TableOfContents from "./toc";
 import { Faq } from "./components/Faq";
-import Link from "next/link";
+import Image from "next/image";
 
 const sections = [
   { id: "hero", title: "Quests" },
   { id: "hqw", title: "How Quests Work" },
-  // { id: "categories", title: "Quest Categories" },
-  { id: "point-system", title: "Point System" },
+  { id: "stages", title: "Quest Stages" },
+  { id: "types", title: "Types of Tasks" },
   { id: "distribution-model", title: "Distribution Model" },
+  { id: "timing", title: "Campaign Timing" },
   { id: "rules", title: "Rules" },
-  // { id: "launchQuest", title: "Launch Your Own Quest Campaign" },
   { id: "faq", title: "Frequently Ask Questions" },
 ];
 
@@ -21,70 +21,67 @@ export default function QuestPage() {
       <div className="grid grid-cols-1 gap-12 lg:grid-cols-[1fr_280px] text-white mt-20">
         {/* MAIN CONTENT */}
         <main className="space-y-12">
-          {/* <div className="text-sm text-gray-300 mb-8">
-            Page last updated: January 16, 2026
-          </div> */}
 
           {/* Hero Section */}
-          <section className="space-y-6">
+          <section className="space-y-6" id="hero">
             <div className="flex flex-col md:flex-row items-center gap-8">
               <div className="flex-1 space-y-6">
-                <h1 id="hero" className="text-4xl font-bold tracking-tight sm:text-5xl bg-linear-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+                <h1 className="text-4xl font-bold tracking-tight sm:text-5xl bg-linear-to-r from-blue-400 to-[#0052FF] bg-clip-text text-transparent">
                   Quests
                 </h1>
                 <p className="text-2xl text-gray-300">Get Rewarded for Web3 Engagement</p>
                 <p className="text-lg text-gray-400">
-                  Complete tasks, accumulate points, and claim your rewards. Join thousands of community members earning through quests.
+                  Complete tasks, climb stages, and claim onchain rewards gaslessly. Thousands of community members earn daily through quests.
                 </p>
                 <div className="flex-1">
-                <div className="relative aspect-video bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden">
-                  {/* Replace with actual image */}
-                  <div className="absolute inset-0 flex items-center justify-center text-gray-500">
-                    <span>Hero Image - Quest Platform Interface or walkthrough video</span>
+                  <div className="relative aspect-video bg-gray-800/50 rounded-xl border border-gray-700 overflow-hidden">
+                    {/* Replace with actual image */}
+                    <div className="absolute inset-0 flex items-center justify-center text-gray-500">
+                      <Image
+                        src="/questShot.png"
+                        alt="Quest Platform"
+                        width={1000}
+                        height={1000}
+                        className="w-full h-auto rounded-xl"
+                      />                  </div>
                   </div>
                 </div>
-              </div>
                 <p className="text-lg text-gray-400">
-                Participate in community quests, social challenges, and engagement
-                campaigns. The more you contribute, the more you earn. Winners are
-                selected based on accumulated points and receive their rewards
-                through dedicated faucets.
+                  Participate in structured quest campaigns created by Web3 projects. Each campaign walks you through progressive stages of tasks. Earn points, meet stage thresholds, and receive your rewards automatically through FaucetDrops faucets.
                 </p>
-                <Link 
-                href="https://app.faucetdrops.io/quest"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex flex-wrap gap-4">
+                <button
+                  onClick={() => window.open("https://app.faucetdrops.io/quest", "_blank", "noopener noreferrer")}
+                  className="flex flex-wrap gap-4">
                   <button className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
                     Browse Active Quests
                   </button>
-                </Link>
+                </button>
               </div>
             </div>
           </section>
 
           {/* How Quests Work */}
-          <section className="space-y-6">
-            <h2 id="hqw" className="text-2xl font-bold text-white border-l-4 border-blue-500 pl-4">
+          <section className="space-y-6" id="hqw">
+            <h2 className="text-2xl font-bold text-white border-l-4 border-blue-500 pl-4">
               How Quests Work
             </h2>
             <ol className="space-y-6">
               {[
                 {
-                  title: "Discover Quests",
-                  desc: "Browse active quests from your favorite Web3 projects. Each quest has specific tasks, point values, and reward pools.",
+                  title: "Discover a Quest",
+                  desc: "Browse live campaigns from Web3 projects. Each quest has a title, image, description, reward pool, and token specified by the creator.",
                 },
                 {
-                  title: "Complete Tasks",
-                  desc: "Engage with communities through social media interactions, content creation, trading activities, and more. Each completed task earns you points.",
+                  title: "Complete Tasks by Stage",
+                  desc: "Work through Beginner → Intermediate → Advance → Legend → Ultimate stages. Each stage contains tasks worth set point values. Meeting the pass requirement (70% of stage points) unlocks the next stage."
                 },
                 {
-                  title: "Climb the Leaderboard",
-                  desc: "Track your progress in real-time. Points are awarded instantly upon verification. The more quests you complete, the higher your ranking and the bigger your potential rewards.",
+                  title: "Accumulate Points",
+                  desc: "Every completed and verified task adds points to your total. Points determine your position in the reward distribution, the more you earn, the bigger your share.",
                 },
                 {
                   title: "Claim Your Rewards",
-                  desc: "Winners are automatically mapped to reward faucets. Claim your earned tokens gaslessly based on your final point total.",
+                  desc: "After the quest ends, a claim window opens (typically 7 days). Rewards are distributed onchain via FaucetDrops faucets."
                 },
               ].map((item, index) => (
                 <li key={index} className="flex gap-4">
@@ -100,220 +97,228 @@ export default function QuestPage() {
             </ol>
           </section>
 
-          {/* Quest Categories */}
-          {/* <section className="space-y-6">
+          {/* Quest Stages */}
+          <section className="space-y-6" id="stages">
             <div className="flex items-center justify-between">
-              <h2 id="categories" className="text-2xl font-bold text-white border-l-4 border-blue-500 pl-4">
-                Quest Categories
+              <h2 className="text-2xl font-bold text-white border-l-4 border-blue-500 pl-4">
+                Quest Stages
               </h2>
             </div>
+            <p className="text-gray-300">
+              Quests are structured into up to five stages of increasing difficulty. Each stage requires you to hit 70% of its available points before advancing. When Strict Progression Mode is enabled, stages must be completed in order.
+            </p>
 
             <div className="grid gap-6 md:grid-cols-2">
               {[
                 {
-                  emoji: "🎯",
-                  title: "Social Quests",
-                  subtitle: "Grow communities through meaningful engagement",
-                  points: "5-50 points per task",
-                  image: "social-quests.jpg",
-                  items: [
-                    "Follow accounts on Twitter/X",
-                    "Like and retweet posts",
-                    "Join Discord servers and engage",
-                    "Join Telegram channels",
-                    "Share custom content with hashtags",
-                    "Create original content about projects"
-                  ]
+                  emoji: "🌱",
+                  title: "Beginner",
+                  subtitle: "Entry-level tasks. Follow accounts, visit pages, join communities",
+                },
+                {
+                  emoji: "⚡",
+                  title: "Intermediate",
+                  subtitle: "Deeper engagement. Content creation, referrals, daily check-ins",
+                },
+                {
+                  emoji: "🔥",
+                  title: "Advance",
+                  subtitle: "Active participation. Trading tasks, creative submissions",
                 },
                 {
                   emoji: "💎",
-                  title: "Trading Quests",
-                  subtitle: "Reward active protocol users",
-                  points: "50-500 points per task",
-                  image: "trading-quests.jpg",
-                  items: [
-                    "Swap tokens on DEXs",
-                    "Provide liquidity",
-                    "Complete transactions above threshold",
-                    "Bridge assets cross-chain",
-                    "Stake tokens",
-                    "Participate in governance votes"
-                  ]
+                  title: "Legend",
+                  subtitle: "High-effort tasks with significant point rewards",
                 },
                 {
-                  emoji: "🎨",
-                  title: "Creative Quests",
-                  subtitle: "Showcase your creativity",
-                  points: "100-1000 points per submission",
-                  image: "creative-quests.jpg",
-                  items: [
-                    "Create memes or artwork",
-                    "Write threads or articles",
-                    "Make videos or tutorials",
-                    "Design graphics",
-                    "Develop educational content",
-                    "Build community tools"
-                  ]
-                },
-                {
-                  emoji: "🏆",
-                  title: "Challenge Quests",
-                  subtitle: "Compete in special events",
-                  points: "25-750 points",
-                  image: "challenge-quests.jpg",
-                  items: [
-                    "Limited-time competitions",
-                    "Trivia and quizzes",
-                    "Scavenger hunts",
-                    "Referral competitions",
-                    "Tournament participation",
-                    "Community votes"
-                  ]
-                },
-                {
-                  emoji: "📚",
-                  title: "Educational Quests",
-                  subtitle: "Learn while earning",
-                  points: "10-200 points per task",
-                  image: "educational-quests.jpg",
-                  items: [
-                    "Complete tutorials",
-                    "Pass quizzes about protocols",
-                    "Read documentation",
-                    "Watch educational videos",
-                    "Participate in workshops"
-                  ]
+                  emoji: "👑",
+                  title: "Ultimate",
+                  subtitle: "Top-tier challenges reserved for the most dedicated participants",
                 }
               ].map((category, index) => (
                 <div key={index} className="bg-gray-800/50 rounded-xl border border-gray-700 hover:border-blue-500/50 transition-colors overflow-hidden group pb-6">
-                  <div className="h-40 bg-gray-700 relative">
+                  {/* <div className="h-40 bg-gray-700 relative">
                     <div className="absolute inset-0 flex items-center justify-center text-gray-500">
-                      <span>Image: {category.title}</span>
+                      <span>Image: {category.emoji}</span>
                     </div>
-                    <div className="absolute top-3 right-3 bg-black/70 text-white text-xs px-2 py-1 rounded-full">
-                      {category.points}
-                    </div>
-                  </div>
+                  </div> */}
                   <div className="p-6">
                     <div className="flex items-center gap-3 mb-3">
                       <span className="text-2xl">{category.emoji}</span>
                       <h3 className="text-xl font-semibold text-white">{category.title}</h3>
                     </div>
                     <p className="text-gray-300 mb-4">{category.subtitle}</p>
-                    <button className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors text-sm">
-                      View Quests
-                    </button>
                   </div>
-                    <ul className="space-y-2 mb-4 px-6">
-                      {category.items.map((item, i) => (
-                        <li key={i} className="flex items-start">
-                          <span className="text-blue-400 mr-2">•</span>
-                          <span className="text-gray-300">{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  <div className="text-sm text-blue-300 font-medium px-6">{category.points}</div>
                 </div>
               ))}
             </div>
-          </section> */}
+          </section>
 
-          {/* Point System */}
-          <section className="space-y-6">
-            <h2 id="point-system" className="text-2xl font-bold text-white border-l-4 border-blue-500 pl-4">
-              Point System
+          {/* Types of Tasks */}
+          <section className="space-y-6" id="types">
+            <h2 className="text-2xl font-bold text-white border-l-4 border-blue-500 pl-4">
+              Types of Tasks
             </h2>
-            <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700">
-              <h3 className="text-xl font-semibold text-white mb-4">How Points Work</h3>
-              <p className="text-gray-300 mb-6">
-                Points are the currency of quests. Earn points by completing tasks, and your accumulated points determine your reward allocation.
-              </p>
-
-              <h4 className="font-semibold text-white mb-3">Point Value Factors:</h4>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="bg-gray-900/50 p-4 rounded-lg">
-                  <h5 className="font-medium text-blue-300 mb-2">Task Type</h5>
-                  <ul className="space-y-1.5">
-                    <li className="flex justify-between"><span>Social Tasks</span> <span className="text-blue-300">5-50 pts</span></li>
-                    <li className="flex justify-between"><span>Trading Tasks</span> <span className="text-blue-300">50-500 pts</span></li>
-                    <li className="flex justify-between"><span>Creative Tasks</span> <span className="text-blue-300">100-1000 pts</span></li>
+            <p className="text-gray-300">
+              Quest creators configure tasks from a range of social, creative, and trading actions, each assigned a point value and a verification method.
+            </p>
+            <div className="space-y-6">
+              <h3 className="text-xl font-semibold text-white mb-4">Task Categories</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700">
+                  <h4 className="text-lg font-semibold text-white mb-4">Social Tasks</h4>
+                  <ul className="space-y-3">
+                    <li className="flex items-start">
+                      <span className="text-blue-400 mr-2">•</span>
+                      <span className="text-gray-300">Visit Project Homepage</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-blue-400 mr-2">•</span>
+                      <span className="text-gray-300">Follow on X (Twitter)</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-blue-400 mr-2">•</span>
+                      <span className="text-gray-300">Quote Quest on X</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-blue-400 mr-2">•</span>
+                      <span className="text-gray-300">Like & Retweet on X</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-blue-400 mr-2">•</span>
+                      <span className="text-gray-300">Join Discord Server</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-blue-400 mr-2">•</span>
+                      <span className="text-gray-300">Join Telegram Group</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-blue-400 mr-2">•</span>
+                      <span className="text-gray-300">Watch Intro Video</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-blue-400 mr-2">•</span>
+                      <span className="text-gray-300">Refer Friends</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-blue-400 mr-2">•</span>
+                      <span className="text-gray-300">Daily Check-in</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-blue-400 mr-2">•</span>
+                      <span className="text-gray-300">Share Quest on X</span>
+                    </li>
                   </ul>
                 </div>
-                <div className="space-y-3">
-                  <div className="bg-gray-900/50 p-4 rounded-lg">
-                    <h5 className="font-medium text-blue-300 mb-1">Task Difficulty</h5>
-                    <p className="text-sm text-gray-300">More complex tasks = more points</p>
-                  </div>
-                  <div className="bg-gray-900/50 p-4 rounded-lg">
-                    <h5 className="font-medium text-blue-300 mb-1">Time Sensitivity</h5>
-                    <p className="text-sm text-gray-300">Early completions may earn bonus points</p>
-                  </div>
+                <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700">
+                  <h4 className="text-lg font-semibold text-white mb-4">Creative Tasks</h4>
+                  <ul className="space-y-3">
+                    <li className="flex items-start">
+                      <span className="text-blue-400 mr-2">•</span>
+                      <span className="text-gray-300">Creative content submissions</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-blue-400 mr-2">•</span>
+                      <span className="text-gray-300">Custom project-specific tasks</span>
+                    </li>
+                  </ul>
+                </div>
+                <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700">
+                  <h4 className="text-lg font-semibold text-white mb-4">Trading Tasks</h4>
+                  <ul className="space-y-3">
+                    <li className="flex items-start">
+                      <span className="text-blue-400 mr-2">•</span>
+                      <span className="text-gray-300">Onchain trading activities</span>
+                    </li>
+                    <li className="flex items-start">
+                      <span className="text-blue-400 mr-2">•</span>
+                      <span className="text-gray-300">Project-specific DeFi tasks</span>
+                    </li>
+                  </ul>
                 </div>
               </div>
+              <h3 className="text-xl font-semibold text-white mb-4">Verification Methods:</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700">
+                  <h4 className="text-lg font-semibold text-white mb-4">Manual Link Submission</h4>
+                  <p className="text-gray-300 mb-4">User submits a URL or proof link</p>
+                </div>
+                <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700">
+                  <h4 className="text-lg font-semibold text-white mb-4">Automated API Check</h4>
+                  <p className="text-gray-300 mb-4">Verified instantly</p>
+                </div>
+                <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700">
+                  <h4 className="text-lg font-semibold text-white mb-4">Onchain Verification</h4>
+                  <p className="text-gray-300 mb-4">Wallet-based proof</p>
+                </div>
+              </div>
+              <p className="text-gray-300">Each task&apos;s verification method is set by the quest creator. Points are awarded after successful verification.</p>
             </div>
           </section>
 
           {/* Distribution Model */}
-          <section className="space-y-6">
-            <h2 id="distribution-model" className="text-2xl font-bold text-white border-l-4 border-blue-500 pl-4">
+          <section className="space-y-6" id="distribution-model">
+            <h2 className="text-2xl font-bold text-white border-l-4 border-blue-500 pl-4">
               Distribution Model
             </h2>
-            <p className="text-gray-300">Choose from different reward distribution models based on your campaign goals.</p>
-
+            <p className="text-gray-300">
+              Quest creators choose how rewards are allocated. The model is fixed at campaign creation and visible on the quest page before you start.
+            </p>
             <div className="grid gap-6 md:grid-cols-2">
               <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700">
-                <h3 className="text-xl font-semibold text-white mb-4">Top Winners</h3>
-                <p className="text-gray-300 mb-4">Top point earners receive predetermined reward amounts.</p>
-                <div className="space-y-2">
-                  <div className="flex justify-between"><span>1st Place</span> <span className="text-blue-300">30% of pool</span></div>
-                  <div className="flex justify-between"><span>2nd Place</span> <span className="text-blue-300">20% of pool</span></div>
-                  <div className="flex justify-between"><span>3rd Place</span> <span className="text-blue-300">15% of pool</span></div>
-                  <div className="flex justify-between"><span>4th-10th</span> <span className="text-blue-300">5% each</span></div>
-                  <div className="flex justify-between"><span>11th-50th</span> <span className="text-blue-300">Remainder split</span></div>
+                <h3 className="text-xl font-semibold text-white mb-4">Equal</h3>
+                <p className="text-gray-300 mb-4">All winners receive an equal share of the pool. The creator sets the number of winners.</p>
+                <div className="bg-gray-900/50 p-4 rounded-lg font-mono text-sm">
+                  <div className="text-blue-300">Each winner =</div>
+                  <div className="ml-4">Total Pool ÷ Number of Winners</div>
                 </div>
               </div>
 
               <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700">
-                <h3 className="text-xl font-semibold text-white mb-4">Proportional Distribution</h3>
-                <p className="text-gray-300 mb-4">All participants receive rewards proportional to their points.</p>
-                <div className="bg-gray-900/50 p-4 rounded-lg font-mono text-sm">
-                  <div className="text-blue-300">Your Reward =</div>
-                  <div className="ml-4">(Your Points / Total Points) × Reward Pool</div>
-                </div>
+                <h3 className="text-xl font-semibold text-white mb-4">Custom Tier</h3>
+                <p className="text-gray-300 mb-4">Fixed reward amounts for top-ranked participants, set by the creator at campaign setup.</p>
               </div>
             </div>
 
+            <p className="text-gray-300">⚠️ All reward pools include a 5% platform fee collected at deposit. Reward amounts shown on quest pages reflect post-fee distribution.</p>
+          </section>
+
+          {/* Campaign Timing */}
+          <section className="space-y-6" id="timing">
+            <h2 className="text-2xl font-bold text-white border-l-4 border-blue-500 pl-4">
+              Campaign Timing
+            </h2>
             <div className="bg-gray-800/50 rounded-xl p-6 border border-gray-700">
-              <h3 className="text-xl font-semibold text-white mb-4">Threshold-Based</h3>
-              <p className="text-gray-300 mb-4">Reach point milestones to unlock reward tiers.</p>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="bg-gray-900/50 p-4 rounded-lg text-center">
-                  <div className="text-2xl font-bold text-blue-300">100</div>
-                  <div className="text-sm">points</div>
-                  <div className="mt-2 text-sm">10 tokens</div>
+              {/* <h3 className="text-xl font-semibold text-white mb-4">How Points Work</h3> */}
+              <p className="text-gray-300 mb-6">
+                Every quest has three key windows:
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="bg-gray-900/50 p-4 rounded-lg">
+                  <h5 className="font-medium text-blue-300 mb-2">Active Period</h5>
+                  <p className="space-y-1.5">
+                    The window between the campaign start and end time. Tasks can only be completed during this period.
+                  </p>
                 </div>
-                <div className="bg-gray-900/50 p-4 rounded-lg text-center">
-                  <div className="text-2xl font-bold text-blue-300">500</div>
-                  <div className="text-sm">points</div>
-                  <div className="mt-2 text-sm">75 tokens</div>
+                <div className="space-y-3">
+                  <div className="bg-gray-900/50 p-4 rounded-lg">
+                    <h5 className="font-medium text-blue-300 mb-1">Claim Window</h5>
+                    <p className="text-sm text-gray-300">After the campaign ends, winners have a set window to claim their rewards. The default is 168 hours (7 days). Check each quest&apos;s page for its specific claim window.</p>
+                  </div>
                 </div>
-                <div className="bg-gray-900/50 p-4 rounded-lg text-center">
-                  <div className="text-2xl font-bold text-blue-300">1,000</div>
-                  <div className="text-sm">points</div>
-                  <div className="mt-2 text-sm">200 tokens</div>
-                </div>
-                <div className="bg-gray-900/50 p-4 rounded-lg text-center">
-                  <div className="text-2xl font-bold text-blue-300">2,500</div>
-                  <div className="text-sm">points</div>
-                  <div className="mt-2 text-sm">600 tokens</div>
+                <div className="sm:col-span-2">
+                  <div className="bg-gray-900/50 p-4 rounded-lg">
+                    <h5 className="font-medium text-blue-300 mb-1">Gasless Payout</h5>
+                    <p className="text-sm text-gray-300">Verified winners claim tokens through a FaucetDrops faucet, no gas required.</p>
+                  </div>
                 </div>
               </div>
             </div>
           </section>
 
           {/* Rules */}
-          <section className="space-y-6">
-            <h2 id="rules" className="text-2xl font-bold text-white border-l-4 border-blue-500 pl-4">
+          <section className="space-y-6" id="rules">
+            <h2 className="text-2xl font-bold text-white border-l-4 border-blue-500 pl-4">
               Rules & Eligibility
             </h2>
             <div className="space-y-6">
@@ -322,15 +327,11 @@ export default function QuestPage() {
                 <ul className="space-y-3">
                   <li className="flex items-start">
                     <span className="text-blue-400 mr-2">•</span>
-                    <span className="text-gray-300">Must be at least 18 years old or the age of majority in your jurisdiction</span>
+                    <span className="text-gray-300">Must complete KYC verification if required by the campaign</span>
                   </li>
                   <li className="flex items-start">
                     <span className="text-blue-400 mr-2">•</span>
-                    <span className="text-gray-300">Must complete KYC/AML verification if required</span>
-                  </li>
-                  <li className="flex items-start">
-                    <span className="text-blue-400 mr-2">•</span>
-                    <span className="text-gray-300">Must comply with all applicable laws and regulations</span>
+                    <span className="text-gray-300">Must comply with all applicable regulations</span>
                   </li>
                 </ul>
               </div>
@@ -340,19 +341,19 @@ export default function QuestPage() {
                 <ul className="space-y-3">
                   <li className="flex items-start">
                     <span className="text-blue-400 mr-2">•</span>
-                    <span className="text-gray-300">One account per participant</span>
+                    <span className="text-gray-300">One account per participant (duplicate accounts will be disqualified)</span>
                   </li>
                   <li className="flex items-start">
                     <span className="text-blue-400 mr-2">•</span>
-                    <span className="text-gray-300">No automated or scripted participation</span>
+                    <span className="text-gray-300">No automated, scripted, or bot-assisted participation</span>
                   </li>
                   <li className="flex items-start">
                     <span className="text-blue-400 mr-2">•</span>
-                    <span className="text-gray-300">Fair play policy applies to all participants</span>
+                    <span className="text-gray-300">Fair play policy applies: manipulation of tasks or points is prohibited</span>
                   </li>
                   <li className="flex items-start">
                     <span className="text-blue-400 mr-2">•</span>
-                    <span className="text-gray-300">Rewards are subject to verification</span>
+                    <span className="text-gray-300">Rewards are subject to final verification before distribution</span>
                   </li>
                 </ul>
               </div>
@@ -373,16 +374,14 @@ export default function QuestPage() {
               <div className="max-w-3xl mx-auto">
                 <h2 className="text-3xl font-bold text-white mb-4">Ready to Start Earning?</h2>
                 <p className="text-gray-300 mb-8 text-lg">
-                  Join our community of Web3 enthusiasts and start completing quests to earn rewards today.
+                  Join thousands of Web3 enthusiasts completing quests and earning onchain rewards - <span className="font-semibold">gaslessly</span>
                 </p>
               </div>
-              <Link
-               href="https://app.faucetdrops.io/quest"
-               target="_blank"
-               rel="noopener noreferrer"
-               className="px-6 py-3 bg-white hover:bg-gray-100 text-gray-900 font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
+              <button
+                onClick={() => window.open("https://app.faucetdrops.io/quest", "_blank", "noopener noreferrer")}
+                className="px-6 py-3 bg-white hover:bg-gray-100 text-gray-900 font-medium rounded-lg transition-colors flex items-center justify-center gap-2 whitespace-nowrap">
                 Explore Quests
-              </Link>
+              </button>
             </div>
           </section>
         </main>

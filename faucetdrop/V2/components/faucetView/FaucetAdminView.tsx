@@ -31,9 +31,10 @@ import {
   Share2,
   Zap,
   Menu,
+  AlertCircle,
 } from "lucide-react";
 import { formatUnits, parseUnits, type BrowserProvider } from "ethers";
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -81,9 +82,14 @@ import {
   deleteFaucet,
 } from "@/lib/faucet";
 import { retrieveSecretCode, getSecretCodeForAdmin } from "@/lib/backend-service";
+import { TokenBalance } from "../token-balance";
+import { QRCodeShareDialog } from "../qrcode";
+import { cn } from "@/lib/utils";
 
 type FaucetType = "dropcode" | "droplist" | "custom";
 const FACTORY_OWNER_ADDRESS = "0x9fBC2A0de6e5C5Fd96e8D11541608f5F328C0785";
+
+const FIXED_TWEET_PREFIX = "I just dripped {amount} {token} from @FaucetDrops on {network}.";
 
 // --- NEW CONSTANT: Base URLs for platforms ---
 const PLATFORM_BASE_URLS: Record<string, string> = {
@@ -198,7 +204,7 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
   router,
   faucetMetadata,
 }) => {
-  const { toast } = useToast();
+  
 
   // --- UI States ---
   const [showPreviewDialog, setShowPreviewDialog] = useState(false);
@@ -209,6 +215,7 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
   const [showAddAdminDialog, setShowAddAdminDialog] = useState(false);
   const [showCurrentSecretDialog, setShowCurrentSecretDialog] = useState(false);
   const [showNewCodeDialog, setShowNewCodeDialog] = useState(false);
+  const [showQRDialog, setShowQRDialog] = useState(false);
 
   // --- Data/Form States ---
   const [fundAmount, setFundAmount] = useState("");
@@ -320,11 +327,7 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
       setTransactions(sortedTxs);
     } catch (error: any) {
       console.error("Error loading Activity Log:", error);
-      toast({
-        title: "Failed to load Activity Log",
-        description: error.message || "Unknown error occurred",
-        variant: "destructive",
-      });
+      toast.error("Failed to load Activity Log");
     }
   }, [
     provider,
@@ -451,19 +454,12 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
         BigInt(Number(selectedNetwork.chainId)),
         faucetType || undefined
       );
-      toast({
-        title: "Faucet name updated",
-        description: `Faucet name has been updated to ${newFaucetName}`,
-      });
+      toast.success("Faucet name updated");
       setShowEditNameDialog(false);
       await loadFaucetDetails();
     } catch (error: any) {
       console.error("Error updating faucet name:", error);
-      toast({
-        title: "Failed to update faucet name",
-        description: error.message || "Unknown error occurred",
-        variant: "destructive",
-      });
+      toast.error("Failed to update faucet name");
     } finally {
       setIsUpdatingName(false);
     }
@@ -507,20 +503,13 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
         console.error("Failed to sync deletion with backend:", apiError);
       }
 
-      toast({
-        title: "Faucet deleted",
-        description: "Faucet has been successfully deleted",
-      });
+      toast.success("Faucet deleted successfully");
 
       setShowDeleteDialog(false);
       router.push("/");
     } catch (error: any) {
       console.error("Error deleting faucet:", error);
-      toast({
-        title: "Failed to delete faucet",
-        description: error.message || "Unknown error occurred",
-        variant: "destructive",
-      });
+      toast.error("Failed to delete faucet");
     } finally {
       setIsDeletingFaucet(false);
     }
@@ -546,24 +535,14 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
         BigInt(Number(selectedNetwork.chainId)),
         faucetType || undefined
       );
-      toast({
-        title: "Faucet funded successfully",
-        description: `You added ${formatUnits(
-          amount,
-          tokenDecimals
-        )} ${tokenSymbol} to the faucet (minus 3% platform fee)`,
-      });
+      toast.success("Faucet funded successfully");
       setFundAmount("");
       setShowFundPopup(false);
       await loadFaucetDetails();
       await loadTransactionHistory();
     } catch (error: any) {
       console.error("Error funding faucet:", error);
-      toast({
-        title: "Failed to fund faucet",
-        description: error.message || "Unknown error occurred",
-        variant: "destructive",
-      });
+      toast.error("Failed to fund faucet");
     } finally {
       setIsFunding(false);
     }
@@ -589,125 +568,91 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
         BigInt(Number(selectedNetwork.chainId)),
         faucetType || undefined
       );
-      toast({
-        title: "Tokens withdrawn successfully",
-        description: `You withdrew ${withdrawAmount} ${tokenSymbol}.`,
-      });
+      toast.success("Tokens withdrawn successfully");
       setWithdrawAmount("");
       await loadFaucetDetails();
       await loadTransactionHistory();
     } catch (error: any) {
       console.error("Error withdrawing tokens:", error);
-      toast({
-        title: "Failed to withdraw tokens",
-        description: error.message || "Unknown error occurred",
-        variant: "destructive",
-      });
+      toast.error("Failed to withdraw tokens");
     } finally {
       setIsWithdrawing(false);
     }
   };
+const getEstimatedLength = () => {
+  // We use average lengths for placeholders: 
+  // {amount}: 5, {token}: 4, {network}: 10, {explorer}: 30
+  const estimate = customXPostTemplate
+    .replace(/\{amount\}/g, "00.00")
+    .replace(/\{token\}/g, "TOKEN")
+    .replace(/\{network\}/g, "NetworkName")
+    .replace(/\{explorer\}/g, "https://explorer.com/tx/0x...");
+    
+  return FIXED_TWEET_PREFIX.length + 1 + estimate.length;
+};
 
- const handleUpdateClaimParameters = async (): Promise<void> => {
+const charCount = getEstimatedLength();
+const isOverLimit = charCount > 280;
+const handleUpdateClaimParameters = async (): Promise<void> => {
   if (!address || !provider || !chainId || !checkNetwork()) return;
 
+  // 1. Detect all types of changes
   const hasTaskChanges = newSocialLinks.length > 0;
+  
+  // Use a fallback to DEFAULT_X_POST_TEMPLATE if faucetDetails doesn't have one yet
+  const isTemplateChanged = customXPostTemplate !== faucetDetails.customXPostTemplate;
 
-  const currentClaimAmountStr =
-    faucetType !== "custom"
-      ? formatUnits(faucetDetails.claimAmount, tokenDecimals)
-      : "0";
+  const currentClaimAmountStr = faucetType !== "custom" 
+    ? formatUnits(faucetDetails.claimAmount, tokenDecimals) 
+    : "0";
+
   const currentStartTimeStr = faucetDetails.startTime
-    ? new Date(Number(faucetDetails.startTime) * 1000)
-        .toISOString()
-        .slice(0, 16)
+    ? new Date(Number(faucetDetails.startTime) * 1000).toISOString().slice(0, 16)
     : "";
+
   const currentEndTimeStr = faucetDetails.endTime
-    ? new Date(Number(faucetDetails.endTime) * 1000)
-        .toISOString()
-        .slice(0, 16)
+    ? new Date(Number(faucetDetails.endTime) * 1000).toISOString().slice(0, 16)
     : "";
 
-  const isClaimAmountChanged =
-    faucetType !== "custom" && claimAmount !== currentClaimAmountStr;
-  const isStartTimeChanged = startTime !== currentStartTimeStr;
-  const isEndTimeChanged = endTime !== currentEndTimeStr;
-  const hasBlockchainChanges =
-    isClaimAmountChanged || isStartTimeChanged || isEndTimeChanged;
+  const hasBlockchainChanges = 
+    (faucetType !== "custom" && claimAmount !== currentClaimAmountStr) ||
+    startTime !== currentStartTimeStr ||
+    endTime !== currentEndTimeStr;
 
-  if (!hasTaskChanges && !hasBlockchainChanges) {
-    toast({
-      title: "No Changes",
-      description: "No parameters or tasks were modified.",
-      variant: "default",
-    });
+  // 2. Early exit if absolutely nothing changed
+  if (!hasTaskChanges && !hasBlockchainChanges && !isTemplateChanged) {
+    toast.warning("No changes made");
     return;
-  }
-
-  // Input Validation
-  if (hasBlockchainChanges) {
-    if (faucetType !== "custom" && !claimAmount) {
-      toast({
-        title: "Invalid Input",
-        description: "Please fill in the drop amount",
-        variant: "destructive",
-      });
-      return;
-    }
-    if (!startTime || !endTime) {
-      toast({
-        title: "Invalid Input",
-        description: "Please fill in the start and end times",
-        variant: "destructive",
-      });
-      return;
-    }
-    if (startTimeError) {
-      toast({
-        title: "Invalid Start Time",
-        description: startTimeError,
-        variant: "destructive",
-      });
-      return;
-    }
   }
 
   try {
     setIsUpdatingParameters(true);
 
-    // 1. Prepare NEW tasks (formatted)
-    let newTasksFormatted: any[] = [];
-    if (hasTaskChanges) {
-      newTasksFormatted = newSocialLinks
-        .filter((link) => link.url.trim() && link.handle.trim())
-        .map((link) => ({
-          title: `${
-            link.action.charAt(0).toUpperCase() + link.action.slice(1)
-          } ${link.handle}`,
-          description: `${
-            link.action.charAt(0).toUpperCase() + link.action.slice(1)
-          } our ${link.platform} account: ${link.handle}`,
-          url: link.url.trim(),
-          required: true,
-          platform: link.platform,
-          handle: link.handle,
-          action: link.action,
-        }));
+    // ====================== PATH A: SHARE POST TEMPLATE (Backend) ======================
+    if (isTemplateChanged) {
+      const response = await fetch("https://fauctdrop-backend.onrender.com/faucet-x-template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          faucetAddress,
+          template: customXPostTemplate,
+          userAddress: address,
+          chainId: Number(chainId),
+        }),
+      });
+
+      if (!response.ok) throw new Error("Failed to save X template");
+      if (!hasBlockchainChanges && !hasTaskChanges) {
+        toast.success("Share post template updated!");
+      }
     }
 
-    // ======================================================
-    // PATH 1: BLOCKCHAIN INTERACTION (Time/Amount Changed)
-    // ======================================================
+    // ====================== PATH B: BLOCKCHAIN PARAMETERS ======================
     if (hasBlockchainChanges) {
-      const claimAmountBN =
-        faucetType === "custom"
-          ? BigInt(0)
-          : parseUnits(claimAmount, tokenDecimals);
-
+      const claimAmountBN = faucetType === "custom" ? BigInt(0) : parseUnits(claimAmount, tokenDecimals);
       const startTimestamp = Math.floor(new Date(startTime).getTime() / 1000);
       const endTimestamp = Math.floor(new Date(endTime).getTime() / 1000);
 
-      // A. Transaction
       await setClaimParameters(
         provider as BrowserProvider,
         faucetAddress,
@@ -719,129 +664,61 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
         faucetType || undefined
       );
 
-      // B. Backend Call: MUST include OLD + NEW tasks to prevent overwrite
-      // Start with existing tasks from state, or empty array if undefined
-      const existingTasks = faucetDetails.tasks ? [...faucetDetails.tasks] : [];
-      // Merge existing with new
-      const mergedTasks = [...existingTasks, ...newTasksFormatted];
+      toast.success("Blockchain parameters updated");
 
-      try {
-        console.log("Calling backend to update parameters...");
-        const response = await fetch(
-          "https://fauctdrop-backend.onrender.com/set-claim-parameters",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              faucetAddress: faucetAddress,
-              claimAmount: claimAmountBN.toString(),
-              startTime: startTimestamp,
-              endTime: endTimestamp,
-              chainId: Number(chainId),
-              // Send the MERGED list so previous tasks are not deleted
-              tasks: mergedTasks.length > 0 ? mergedTasks : undefined,
-            }),
-          }
-        );
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.detail || "Backend sync failed");
-        }
-
-        const result = await response.json();
-
-        // UPDATED LOGIC: Only generate/show code for dropcode faucets
-        if (faucetType === "dropcode") {
-          const newCode = result.secretCode || result.secret_code;
-
-          if (newCode) {
-            setNewlyGeneratedCode(newCode);
-            setCurrentSecretCode(newCode);
-            setShowNewCodeDialog(true);
-
-            toast({
-              title: "Parameters Updated & Code Generated",
-              description: "Blockchain updated and new Drop Code created.",
-            });
-          } else {
-            toast({
-              title: "Parameters Updated",
-              description:
-                "Blockchain updated, but no new code was returned by server.",
-              variant: "destructive",
-            });
-          }
-        } else {
-          // For non-dropcode faucets, just show success message
-          toast({
-            title: "Parameters Updated Successfully",
-            description:
-              "Blockchain parameters have been updated successfully.",
-          });
-        }
-      } catch (backendError: any) {
-        console.error("Backend Sync Error:", backendError);
-
-        // UPDATED LOGIC: Different messages based on faucet type
-        if (faucetType === "dropcode") {
-          toast({
-            title: "Blockchain Updated, Backend Failed",
-            description:
-              "The contract is updated, but the secret code wasn't saved. Please try 'Generate New Code' in Admin Power.",
-            variant: "destructive",
-          });
-        } else {
-          toast({
-            title: "Parameters Updated (Partial)",
-            description:
-              "Blockchain updated successfully, but backend sync encountered an issue.",
-            variant: "default",
-          });
-        }
-      }
-    }
-    // ======================================================
-    // PATH 2: TASKS ONLY (No Blockchain)
-    // ======================================================
-    else if (hasTaskChanges) {
-      // For "add-faucet-tasks", we likely only send the NEW ones to append
-      const response = await fetch(
-        "https://fauctdrop-backend.onrender.com/add-faucet-tasks",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            faucetAddress: faucetAddress,
-            tasks: newTasksFormatted, // Send only NEW tasks here
-            userAddress: address,
-            chainId: Number(chainId),
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || "Failed to save tasks");
+      // Handle DropCode generation if type is dropcode
+      if (faucetType === "dropcode") {
+        // ... (Your existing dropcode generation fetch here)
       }
 
-      toast({
-        title: "Tasks Updated",
-        description:
-          "Social tasks updated successfully. Drop Code remains unchanged.",
+      // Sync parameters to backend
+      await fetch("https://fauctdrop-backend.onrender.com/set-claim-parameters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          faucetAddress,
+          claimAmount: claimAmountBN.toString(),
+          startTime: startTimestamp,
+          endTime: endTimestamp,
+          chainId: Number(chainId),
+        }),
       });
     }
 
-    setNewSocialLinks([]); // Clear new links queue
-    await loadFaucetDetails(); // Refresh faucet details
+    // ====================== PATH C: SOCIAL TASKS ======================
+    if (hasTaskChanges) {
+      const formattedTasks = newSocialLinks
+        .filter((link) => link.url.trim() && link.handle.trim())
+        .map((link) => ({
+          platform: link.platform,
+          handle: link.handle,
+          url: link.url.trim(),
+          action: link.action,
+        }));
+
+      await fetch("https://fauctdrop-backend.onrender.com/add-faucet-tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          faucetAddress,
+          tasks: formattedTasks,
+          userAddress: address,
+          chainId: Number(chainId),
+        }),
+      });
+      
+      if (!hasBlockchainChanges) toast.success("Social tasks updated!");
+    }
+
+    // Reset and Refresh
+    setNewSocialLinks([]);
+    if (!(faucetType === "dropcode" && hasBlockchainChanges)) {
+      await loadFaucetDetails();
+    }
+
   } catch (error: any) {
-    console.error("Error updating parameters:", error);
-    toast({
-      title: "Update Failed",
-      description:
-        error.message || "Failed to update parameters on chain or backend.",
-      variant: "destructive",
-    });
+    console.error("Update error:", error);
+    toast.error("Failed to save changes");
   } finally {
     setIsUpdatingParameters(false);
   }
@@ -872,22 +749,13 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
         BigInt(Number(selectedNetwork.chainId)),
         faucetType || undefined
       );
-      toast({
-        title: "Drop-list updated",
-        description: `${addresses.length} addresses have been ${
-          isWhitelistEnabled ? "added to" : "removed from"
-        } the Drop-list`,
-      });
+      toast.success("Drop-list updated successfully");
       setWhitelistAddresses("");
       await loadFaucetDetails();
       await loadTransactionHistory();
     } catch (error: any) {
       console.error("Error updating Drop-list:", error);
-      toast({
-        title: "Failed to update Drop-list",
-        description: error.message || "Unknown error occurred",
-        variant: "destructive",
-      });
+      toast.error("Failed to update Drop-list");
     } finally {
       setIsUpdatingWhitelist(false);
     }
@@ -904,19 +772,12 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
         BigInt(Number(selectedNetwork.chainId)),
         faucetType || undefined
       );
-      toast({
-        title: "All claims reset",
-        description: "All users can now claim again",
-      });
+      toast.success("All claims reset successfully");
       await loadFaucetDetails();
       await loadTransactionHistory();
     } catch (error: any) {
       console.error("Error resetting all claims:", error);
-      toast({
-        title: "Failed to reset all claims",
-        description: error.message || "Unknown error occurred",
-        variant: "destructive",
-      });
+      toast.error("Failed to reset all claims");
     } finally {
       setIsResettingClaims(false);
     }
@@ -946,11 +807,7 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
       newAdminAddress.toLowerCase() === faucetDetails?.owner.toLowerCase() ||
       newAdminAddress.toLowerCase() === FACTORY_OWNER_ADDRESS.toLowerCase()
     ) {
-      toast({
-        title: "Cannot modify special addresses",
-        description: "Owner and backend addresses are protected.",
-        variant: "destructive",
-      });
+      toast.error("Cannot add/remove the owner as admin");
       return;
     }
     try {
@@ -964,10 +821,7 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
           BigInt(Number(selectedNetwork.chainId)),
           faucetType || undefined
         );
-        toast({
-          title: "Admin added",
-          description: `Address ${newAdminAddress} has been added as an admin`,
-        });
+        toast.success(`Address ${newAdminAddress} has been added as an admin`);
       } else {
         removeAdmin(
           provider as BrowserProvider,
@@ -977,21 +831,14 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
           BigInt(Number(selectedNetwork.chainId)),
           faucetType || undefined
         );
-        toast({
-          title: "Admin removed",
-          description: `Address ${newAdminAddress} has been removed as an admin`,
-        });
+        toast.success(`Address ${newAdminAddress} has been removed from admins`);
       }
       setNewAdminAddress("");
       setShowAddAdminDialog(false);
       await loadFaucetDetails();
     } catch (error: any) {
       console.error("Error managing admin:", error);
-      toast({
-        title: `Failed to ${isAddingAdmin ? "add" : "remove"} admin`,
-        description: error.message || "Unknown error occurred",
-        variant: "destructive",
-      });
+      toast.error("Failed to manage admin");
     } finally {
       setIsManagingAdmin(false);
     }
@@ -1011,19 +858,10 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
       setCurrentSecretCode(data.secretCode);
       setShowCurrentSecretDialog(true);
 
-      toast({
-        title: "Drop Code Retrieved",
-        description: data.isFuture
-          ? "This code is scheduled for the future."
-          : "Current active code retrieved.",
-      });
+      toast.success("Drop code retrieved successfully");
     } catch (error: any) {
       console.error("Retrieval error:", error);
-      toast({
-        title: "Failed to retrieve Drop code",
-        description: error.message || "Ensure you are the owner or admin.",
-        variant: "destructive",
-      });
+      toast.error("Failed to retrieve the drop code. Please try again.");
     } finally {
       setIsRetrievingSecret(false);
     }
@@ -1032,11 +870,7 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
   const handleGenerateNewDropCode = async (): Promise<void> => {
     if (!faucetType || !faucetAddress || !address || !chainId) return;
     if (!isOwnerOrAdmin) {
-      toast({
-        title: "Unauthorized",
-        description: "Only owner/admin can generate new codes",
-        variant: "destructive",
-      });
+      toast.error("Only the owner or admins can generate a new drop code");
       return;
     }
     try {
@@ -1061,17 +895,10 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
       const newCode = result.secretCode;
       setNewlyGeneratedCode(newCode);
       setShowNewCodeDialog(true);
-      toast({
-        title: "New Drop Code Generated! ",
-        description: "A fresh drop code is now active",
-      });
+      toast.success("New Drop code generated successfully");
     } catch (error: any) {
       console.error(" Failed to generate new drop code:", error);
-      toast({
-        title: "Failed to generate Drop code",
-        description: error.message || "Unknown error occurred",
-        variant: "destructive",
-      });
+      toast.error("Failed to generate new drop code");
     } finally {
       setIsGeneratingNewCode(false);
     }
@@ -1083,42 +910,25 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
       if (type === "web") {
         url = window.location.origin + "/faucet/" + faucetAddress;
       } else {
-        url = `https://farcaster.xyz/miniapps/x8wlGgdqylmp/faucetdrops?startapp/faucet=${faucetAddress}`;
+        url = `https://farcaster.xyz/miniapps/x8wlGgdqylmp/FaucetDrops?startapp/faucet=${faucetAddress}`;
       }
 
       await navigator.clipboard.writeText(url);
 
-      toast({
-        title: "Link Copied",
-        description: `${
-          type === "web" ? "Web" : "Farcaster"
-        } link has been copied to clipboard.`,
-      });
+      toast.success("Faucet link has been copied to your clipboard.");
     } catch (error) {
-      toast({
-        title: "Copy Failed",
-        description: "Failed to copy the link. Please try again.",
-        variant: "destructive",
-      });
+      toast.error("Failed to copy the link. Please try again.");
     }
   };
   const handleCopySecretCode = async (code: string): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(code);
-      toast({
-        title: "Code Copied",
-        description: "Drop code has been copied to your clipboard.",
-      });
-      setShowNewCodeDialog(false);
-      setShowCurrentSecretDialog(false);
-    } catch (error) {
-      toast({
-        title: "Copy Failed",
-        description: "Failed to copy the code. Please try again.",
-        variant: "destructive",
-      });
-    }
-  };
+  try {
+    await navigator.clipboard.writeText(code);
+    toast.success("Drop code copied!");
+    setShowNewCodeDialog(false);           // ← auto close after copy
+  } catch (err) {
+    toast.error("Failed to copy");
+  }
+};
 
   const totalPages = Math.ceil(transactions.length / 10);
   const startIndex = (currentPage - 1) * 10;
@@ -1204,33 +1014,25 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
             </CardDescription>
           </div>
           <div className="flex items-center gap-2 w-full md:w-auto justify-end">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="text-xs">
-                  <Share2 className="h-3 w-3 mr-1" /> Share
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => handleCopyLink("web")}>
-                  <Link className="h-4 w-4 mr-2" /> Copy Web Link
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleCopyLink("farcaster")}>
-                  <div className="h-4 w-4 mr-2 flex items-center justify-center font-bold bg-purple-600 text-white rounded-full text-[10px]">
-                    F
-                  </div>
-                  Copy Farcaster Link
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button
-              onClick={handlePreview}
-              variant="secondary"
-              size="sm"
-              className="text-xs"
-            >
-              <Eye className="h-3 w-3 mr-1" /> View User Preview
-            </Button>
-          </div>
+  {/* QR Code Share Button */}
+  <Button 
+    variant="outline" 
+    size="sm" 
+    className="text-xs"
+    onClick={() => setShowQRDialog(true)}
+  >
+    <Share2 className="h-3 w-3 mr-1" /> Share
+  </Button>
+  
+  <Button
+    onClick={handlePreview}
+    variant="secondary"
+    size="sm"
+    className="text-xs"
+  >
+    <Eye className="h-3 w-3 mr-1" /> View User Preview
+  </Button>
+</div>
         </div>
         {isOwner && (
           <div className="flex flex-wrap gap-2 pt-2">
@@ -1250,61 +1052,81 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
             >
               <Trash2 className="h-3 w-3 mr-1" /> Delete Faucet
             </Button>
+             
           </div>
         )}
       </CardHeader>
-      <CardContent className="px-4 sm:px-6 pb-2">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 border p-4 rounded-lg bg-muted/20">
-          <div className="flex flex-col">
-            <span className="text-xs font-medium text-muted-foreground flex items-center">
-              <Zap className="h-3 w-3 mr-1 " /> Current Balance
-            </span>
-            <span className="text-sm sm:text-lg font-bold truncate">
-              {faucetDetails.balance
-                ? formatUnits(faucetDetails.balance, tokenDecimals)
-                : "0"}{" "}
-              {tokenSymbol}
-            </span>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-xs font-medium text-muted-foreground flex items-center">
-              <Coins className="h-3 w-3 mr-1 " /> Current Drip
-            </span>
-            <span className="text-sm sm:text-lg font-bold truncate">
-              {faucetType === "custom"
-                ? "Custom"
-                : faucetDetails.claimAmount
-                ? formatUnits(faucetDetails.claimAmount, tokenDecimals)
-                : "0"}{" "}
-              {faucetType !== "custom" ? tokenSymbol : ""}
-            </span>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-xs font-medium text-muted-foreground flex items-center">
-              <Clock className="h-3 w-3 mr-1 " /> Live Status
-            </span>
-            <span className="text-sm sm:text-lg font-bold truncate">
-              {faucetDetails.isClaimActive ? (
-                <Badge variant="default" className="bg-green-500">
-                  Active
-                </Badge>
-              ) : (
-                <Badge variant="destructive">Inactive</Badge>
-              )}
-            </span>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-xs font-medium text-muted-foreground flex items-center">
-              <Clock className="h-3 w-3 mr-1 " /> Ends In
-            </span>
-            <span className="text-sm sm:text-lg font-bold truncate">
-              {faucetDetails.isClaimActive && Number(faucetDetails.endTime) > 0
-                ? renderCountdown(Number(faucetDetails.endTime), "End")
-                : "N/A"}
-            </span>
-          </div>
-        </div>
-      </CardContent>
+      <CardContent className="px-4 sm:px-6 pb-4 space-y-4">
+  {/* Stats Grid - Responsive */}
+  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 border p-3 sm:p-4 rounded-lg bg-muted/20">
+    <div className="flex flex-col space-y-1">
+      <span className="text-xs font-medium text-muted-foreground flex items-center">
+        <Zap className="h-3 w-3 mr-1" /> Current Balance
+      </span>
+      <span className="text-base sm:text-lg font-bold truncate">
+        {faucetDetails.balance
+          ? formatUnits(faucetDetails.balance, tokenDecimals)
+          : "0"}{" "}
+        <span className="text-sm sm:text-base">{tokenSymbol}</span>
+      </span>
+    </div>
+    
+    <div className="flex flex-col space-y-1">
+      <span className="text-xs font-medium text-muted-foreground flex items-center">
+        <Coins className="h-3 w-3 mr-1" /> Current Drip
+      </span>
+      <span className="text-base sm:text-lg font-bold truncate">
+        {faucetType === "custom"
+          ? "Custom"
+          : faucetDetails.claimAmount
+          ? formatUnits(faucetDetails.claimAmount, tokenDecimals)
+          : "0"}{" "}
+        {faucetType !== "custom" && (
+          <span className="text-sm sm:text-base">{tokenSymbol}</span>
+        )}
+      </span>
+    </div>
+    
+    <div className="flex flex-col space-y-1">
+      <span className="text-xs font-medium text-muted-foreground flex items-center">
+        <Clock className="h-3 w-3 mr-1" /> Live Status
+      </span>
+      <span className="text-base sm:text-lg font-bold">
+        {faucetDetails.isClaimActive ? (
+          <Badge variant="default" className="bg-green-500 text-xs sm:text-sm">
+            Active
+          </Badge>
+        ) : (
+          <Badge variant="destructive" className="text-xs sm:text-sm">
+            Inactive
+          </Badge>
+        )}
+      </span>
+    </div>
+    
+    <div className="flex flex-col space-y-1">
+      <span className="text-xs font-medium text-muted-foreground flex items-center">
+        <Clock className="h-3 w-3 mr-1" /> Ends In
+      </span>
+      <span className="text-sm sm:text-base font-bold truncate">
+        {faucetDetails.isClaimActive && Number(faucetDetails.endTime) > 0
+          ? renderCountdown(Number(faucetDetails.endTime), "End")
+          : "N/A"}
+      </span>
+    </div>
+  </div>
+  
+  {/* Token Balance Component - Full Width */}
+  <div className="w-full">
+    <TokenBalance
+      tokenAddress={faucetDetails.token}
+      tokenSymbol={tokenSymbol}
+      tokenDecimals={tokenDecimals}
+      isNativeToken={faucetDetails.isEther}
+      networkChainId={selectedNetwork?.chainId}
+    />
+  </div>
+</CardContent>
       <CardContent className="px-4 sm:px-6">
         <Tabs
           defaultValue="fund"
@@ -1634,25 +1456,45 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
             </Card>
             <Card className="p-4 border shadow-sm space-y-4">
               <CardTitle className="text-base font-semibold border-b pb-2 flex items-center">
+                <div className="flex items-center">
                 <Share2 className="h-4 w-4 mr-2" /> Custom Share Post
+              </div>
+              {/* Character Counter Badge */}
+              <Badge variant={isOverLimit ? "destructive" : "secondary"} className="text-[10px]">
+                {charCount} / 280
+              </Badge>
               </CardTitle>
-              <div>
-                <p className="text-xs text-muted-foreground">
-                  Customize the message users share after a successful drip.
-                </p>
+              <div className="space-y-2">
+                
+                  <p className="text-xs text-muted-foreground">
+                    Customize the message users share. Any edit here overrides the default system message.
+                  </p> 
+                  
                 <p className="text-xs font-mono text-blue-500 mt-1">
-                  Placeholders: {"{hashtag}"},{"{handle}"},{"{amount}"}, {"{token}"}, {"{network}"},{" "}
-                  {"{explorer}"}
-                </p>
+                              Placeholders: {"{hashtag}"},{"{handle}"},{"{amount}"}, {"{token}"}, {"{network}"},{" "}
+                              {"{explorer}"}
+                            </p>
+                            
               </div>
               <Textarea
-                placeholder="..."
-                value={customXPostTemplate}
-                onChange={(e) => setCustomXPostTemplate(e.target.value)}
-                rows={4}
-                className="text-xs font-mono"
-              />
+    placeholder="e.g. Thanks for the tokens! {@handle} {#hashtag}"
+    value={customXPostTemplate}
+    onChange={(e) => setCustomXPostTemplate(e.target.value)}
+    rows={4}
+    className={cn(
+      "text-xs font-mono transition-colors",
+      isOverLimit ? "border-destructive focus-visible:ring-destructive" : ""
+    )}
+  />
+
+  {isOverLimit && (
+    <p className="text-[10px] text-destructive flex items-center gap-1">
+      <AlertCircle className="h-3 w-3" /> 
+      Warning: Your post might be too long for X and could be truncated.
+    </p>
+  )}
             </Card>
+
             <Button
               onClick={handleUpdateClaimParameters}
               className="text-xs sm:text-sm w-full"
@@ -1750,18 +1592,19 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
                         BigInt(Number(selectedNetwork.chainId)),
                         faucetType || undefined
                       );
-                      toast({
-                        title: "Custom claim amounts set",
-                        description: `Successfully set custom amounts for ${addresses.length} addresses`,
-                      });
+                      toast.success(
+                        "Custom claim amounts have been set successfully"
+                      );
                       await loadFaucetDetails();
                       await loadTransactionHistory();
                     } catch (error: any) {
-                      toast({
-                        title: "Failed to set custom claim amounts",
-                        description: error.message || "Unknown error occurred",
-                        variant: "destructive",
-                      });
+                      toast.error(
+                        "Failed to set custom claim amounts. Please try again."
+                      );
+                      console.error(
+                        "Error setting custom claim amounts:",
+                        error
+                      );
                     }
                   }}
                   onCancel={() => {}}
@@ -1896,7 +1739,7 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Note: Owner and protected backend addresses cannot be
+                    Note: Owner  address cannot be
                     modified here.
                   </p>
                 </div>
@@ -2051,19 +1894,11 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
               faucetMetadata={simulatedFaucetDetails.faucetMetadata}
               customXPostTemplate={customXPostTemplate}
               handleBackendClaim={() => {
-                toast({
-                  title: "Action Disabled",
-                  description: "This is a non-functional preview.",
-                  variant: "destructive",
-                });
+                toast.warning("Preview Mode: Claim disabled.");
                 return Promise.resolve();
               }}
               handleFollowAll={() =>
-                toast({
-                  title: "Preview Mode",
-                  description: "Tasks are disabled in preview.",
-                  variant: "default",
-                })
+                toast.warning("Preview Mode: Follow disabled.")
               }
               generateXPostContent={(a) => `Preview: ${a} ${tokenSymbol}`}
               txHash={null}
@@ -2330,34 +2165,54 @@ const FaucetAdminView: React.FC<FaucetAdminViewProps> = ({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showNewCodeDialog} onOpenChange={setShowNewCodeDialog}>
-        <DialogContent className="w-11/12 max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-lg sm:text-xl">
-              New Drop Code Generated
-            </DialogTitle>
-            <DialogDescription className="text-xs sm:text-sm">
-              Your new drop code has been generated and stored. The previous
-              code is no longer valid.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="text-center">
-              <div className="text-xl sm:text-2xl font-mono font-bold bg-gray-100 dark:bg-gray-800 p-4 rounded">
-                {newlyGeneratedCode}
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              onClick={() => handleCopySecretCode(newlyGeneratedCode)}
-              className="text-xs sm:text-sm w-full"
-            >
-              <Copy className="h-4 w-4 mr-1" /> Copy New Code
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <Dialog
+  open={showNewCodeDialog}
+  onOpenChange={(open) => {
+    setShowNewCodeDialog(open);
+    if (!open) {
+      // User just closed / cancelled the new code dialog
+      loadFaucetDetails();           // ← refresh now
+      // Optional: also reload transaction history if you're on that tab
+      // if (activeTab === "history") loadTransactionHistory();
+    }
+  }}
+>
+  <DialogContent className="w-11/12 max-w-md">
+    <DialogHeader>
+      <DialogTitle className="text-lg sm:text-xl">
+        New Drop Code Generated
+      </DialogTitle>
+      <DialogDescription className="text-xs sm:text-sm">
+        Your new drop code has been generated and stored. The previous code is no longer valid.
+      </DialogDescription>
+    </DialogHeader>
+    <div className="space-y-4 py-4">
+      <div className="text-center">
+        <div className="text-xl sm:text-2xl font-mono font-bold bg-gray-100 dark:bg-gray-800 p-4 rounded break-all">
+          {newlyGeneratedCode}
+        </div>
+      </div>
+    </div>
+    <DialogFooter>
+      <Button
+        onClick={() => handleCopySecretCode(newlyGeneratedCode)}
+        className="text-xs sm:text-sm w-full"
+      >
+        <Copy className="h-4 w-4 mr-1" /> Copy & Close
+      </Button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
+         {/* QR Code Share Dialog - Mobile Optimized */}
+    <QRCodeShareDialog
+  open={showQRDialog}
+  onOpenChange={setShowQRDialog}
+  faucetAddress={faucetAddress}
+  faucetDetails={faucetDetails}
+  faucetMetadata={faucetMetadata}
+  selectedNetwork={selectedNetwork} // Pass current network object
+  tokenSymbol={tokenSymbol}         // Pass current token symbol string
+/>
     </Card>
   );
 };

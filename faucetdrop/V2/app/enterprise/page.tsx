@@ -36,8 +36,8 @@ export const SimpleIcon: React.FC<SimpleIconProps> = ({
 
 export default function ComingSoon() {
   const socialLinks = [
-    { icon: siX, href: 'https://x.com/faucetdrops', label: 'Twitter' },
-    { icon: siTelegram, href: 'https://t.me/faucetdropschat', label: 'Telegram' },
+    { icon: siX, href: 'https://x.com/FaucetDrops', label: 'Twitter' },
+    { icon: siTelegram, href: 'https://t.me/FaucetDropschat', label: 'Telegram' },
     { icon: siGmail, href: 'mailto:drops.faucet@gmail.com', label: 'Email' },
   ];
 

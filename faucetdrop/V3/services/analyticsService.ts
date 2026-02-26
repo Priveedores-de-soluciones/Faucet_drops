@@ -37,6 +37,7 @@ export class AnalyticsService {
         radarData: this.prepareRadarData(claims),
         pieData: this.preparePieData(claims),
         areaData: this.prepareAreaData(claims),
+        areaData2: this.prepareAreaData2(claims),
       };
     } catch (error) {
       console.error("Error fetching dashboard data:", error);
@@ -193,6 +194,30 @@ export class AnalyticsService {
     return Object.values(dailyData).sort(
       (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
     );
+  }
+
+  private static prepareAreaData2(claims: ClaimData[]) {
+    // Create a map to count claims per network
+    const networkClaims = new Map<string, number>();
+    
+    // Initialize all known networks with 0 claims
+    networks.forEach(network => {
+      networkClaims.set(network.name, 0);
+    });
+
+    // Count claims for each network
+    claims.forEach(claim => {
+      const currentCount = networkClaims.get(claim.networkName) || 0;
+      networkClaims.set(claim.networkName, currentCount + 1);
+    });
+
+    // Convert to array of { name, claims } objects
+    return Array.from(networkClaims.entries())
+      .map(([name, claims]) => ({
+        name,
+        claims,
+      }))
+      .sort((a, b) => b.claims - a.claims); // Sort by claim count descending
   }
 
   private static getCachedData(): ClaimData[] | null {

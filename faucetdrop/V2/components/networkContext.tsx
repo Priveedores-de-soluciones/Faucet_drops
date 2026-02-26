@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
 import { ZeroAddress } from "ethers"
-import { useToast } from "@/hooks/use-toast"
+import { toast } from "sonner"
 
 export interface Network {
   name: string
@@ -98,7 +98,7 @@ const NetworkContext = createContext<NetworkContextType>({
 })
 
 export function NetworkProvider({ children }: { children: ReactNode }) {
-  const { toast } = useToast()
+ 
   const [network, setNetwork] = useState<Network | null>(networks[0])
   const [currentChainId, setCurrentChainId] = useState<bigint | null>(null)
   const [isSwitchingNetwork, setIsSwitchingNetwork] = useState(false)
@@ -152,11 +152,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
 
   const switchNetwork = async (chainId: number) => {
     if (typeof window === "undefined" || !window.ethereum) {
-      toast({
-        title: "No Ethereum Provider",
-        description: "Please install MetaMask or another wallet provider",
-        variant: "destructive",
-      })
+      toast.error("No Ethereum Provider, Please install MetaMask or similar wallet.")
       return
     }
 
@@ -167,11 +163,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
 
     const targetNetwork = networks.find((n) => n.chainId === BigInt(chainId))
     if (!targetNetwork) {
-      toast({
-        title: "Network Not Supported",
-        description: `Chain ID ${chainId} is not supported`,
-        variant: "destructive",
-      })
+      toast.error("Unsupported network")
       return
     }
 
@@ -220,19 +212,11 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
           window.location.reload()
         } catch (addError: any) {
           console.error(`Error adding network ${targetNetwork.name}:`, addError)
-          toast({
-            title: "Failed to Add Network",
-            description: `Could not add ${targetNetwork.name} to your wallet: ${addError.message}`,
-            variant: "destructive",
-          })
+          toast.error(`Could not add network ${targetNetwork.name}: ${addError.message}`)
         }
       } else {
         console.error(`Error switching to network ${targetNetwork.name}:`, error)
-        toast({
-          title: "Network Switch Failed",
-          description: `Could not switch to ${targetNetwork.name}: ${error.message}`,
-          variant: "destructive",
-        })
+        toast.error(`Could not switch to network ${targetNetwork.name}: ${error.message}`)
       }
     } finally {
       setIsSwitchingNetwork(false)

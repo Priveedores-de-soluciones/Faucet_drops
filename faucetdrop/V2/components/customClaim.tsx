@@ -41,7 +41,7 @@ import {
   Eye,
   EyeOff
 } from 'lucide-react'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
 import { parseUnits, formatUnits } from 'ethers'
 
 interface ParsedEntry {
@@ -65,7 +65,7 @@ export function CustomClaimUploader({
   onDataParsed,
   onCancel 
 }: CustomClaimUploaderProps) {
-  const { toast } = useToast()
+  
   
   // State management
   const [file, setFile] = useState<File | null>(null)
@@ -329,10 +329,7 @@ export function CustomClaimUploader({
   // Parse PDF files using pdfjs-dist (browser-compatible)
   const parsePDF = async (file: File): Promise<ParsedEntry[]> => {
     try {
-      toast({
-        title: "Processing PDF",
-        description: "Extracting text from PDF file...",
-      })
+      toast.success("Processing PDF, extracting text from PDF file...")
       
       // Try CDN-based parsing first
       try {
@@ -351,11 +348,7 @@ export function CustomClaimUploader({
     } catch (error: any) {
       console.error('❌ All PDF parsing methods failed:', error)
       
-      toast({
-        title: "PDF Parse Error",
-        description: "Could not extract text from PDF. Please try:\n1. Converting to CSV/TXT\n2. Using Manual Entry tab to paste text",
-        variant: "destructive",
-      })
+      toast.error("Failed to extract text from PDF. Please ensure the PDF contains selectable text.")
       
       return []
     }
@@ -388,10 +381,7 @@ export function CustomClaimUploader({
     
     const entries = parseTXT(fullText)
     
-    toast({
-      title: "PDF Processed (Advanced)",
-      description: `Extracted text from ${pdf.numPages} pages using PDF.js`,
-    })
+    toast.success("PDF processed - Extracted text from PDF")
     
     return entries
   }
@@ -439,10 +429,7 @@ export function CustomClaimUploader({
     
     const entries = parseTXT(combinedText)
     
-    toast({
-      title: "PDF Processed (Basic)",
-      description: `Extracted text using basic method, found ${entries.filter(e => e.isValid).length} valid entries`,
-    })
+    toast.success("PDF processed - Extracted text from PDF")
     
     return entries
   }
@@ -521,11 +508,7 @@ export function CustomClaimUploader({
       if (debugMode) console.log(`✅ Excel parsed: ${entries.length} entries`)
       return entries
     } catch (error) {
-      toast({
-        title: "Excel Parse Error",
-        description: "Could not parse Excel file. Make sure xlsx library is installed.",
-        variant: "destructive",
-      })
+      toast.error("Failed to parse Excel file. Please ensure it's a valid XLSX or XLS file.")
       return []
     }
   }
@@ -541,11 +524,7 @@ export function CustomClaimUploader({
     const isValidFile = validExtensions.some(ext => fileName.endsWith(ext))
 
     if (!isValidFile) {
-      toast({
-        title: "Invalid File Type",
-        description: "Please select a CSV, TXT, PDF, XLSX, or XLS file",
-        variant: "destructive",
-      })
+      toast.error("Invalid file type. Please upload a CSV, TXT, PDF, or Excel file.")
       return
     }
 
@@ -589,17 +568,10 @@ export function CustomClaimUploader({
       setParsedData(entries)
       setShowPreview(true)
 
-      toast({
-        title: "File Processed",
-        description: `Found ${entries.filter(e => e.isValid).length} valid entries and ${entries.filter(e => !e.isValid).length} invalid entries`,
-      })
+      toast.success(`File processed: ${entries.filter(e => e.isValid).length} valid entries found`)
     } catch (error: any) {
       console.error('❌ Processing error:', error)
-      toast({
-        title: "Processing Error",
-        description: error.message || "Failed to process file",
-        variant: "destructive",
-      })
+      toast.error("Error processing file. Please try again.")
     } finally {
       setIsProcessing(false)
     }
@@ -607,11 +579,7 @@ export function CustomClaimUploader({
 
   const handleManualInput = () => {
     if (!manualInput.trim()) {
-      toast({
-        title: "Empty Input",
-        description: "Please enter addresses and amounts",
-        variant: "destructive",
-      })
+      toast.warning("Please enter some data to process.")
       return
     }
 
@@ -624,16 +592,9 @@ export function CustomClaimUploader({
       setParsedData(entries)
       setShowPreview(true)
 
-      toast({
-        title: "Input Processed",
-        description: `Found ${entries.filter(e => e.isValid).length} valid entries`,
-      })
+      toast.success(`Manual input processed: ${entries.filter(e => e.isValid).length} valid entries found`)
     } catch (error: any) {
-      toast({
-        title: "Processing Error",
-        description: error.message || "Failed to process input",
-        variant: "destructive",
-      })
+      toast.error("Error processing manual input. Please check the format and try again.")
     } finally {
       setIsProcessing(false)
     }
@@ -647,11 +608,7 @@ export function CustomClaimUploader({
 
   const handleConfirm = () => {
     if (validEntries.length === 0) {
-      toast({
-        title: "No Valid Entries",
-        description: "Please add valid addresses and amounts",
-        variant: "destructive",
-      })
+      toast.warning("No valid entries to confirm.")
       return
     }
 
@@ -684,10 +641,7 @@ export function CustomClaimUploader({
     a.click()
     URL.revokeObjectURL(url)
 
-    toast({
-      title: "Template Downloaded",
-      description: "Use this template to format your data",
-    })
+    toast.success("Template downloaded")
   }
 
   const handleCopyInvalidEntries = () => {
@@ -696,10 +650,7 @@ export function CustomClaimUploader({
       .join('\n')
     
     navigator.clipboard.writeText(invalidText)
-    toast({
-      title: "Copied to Clipboard",
-      description: "Invalid entries copied for review",
-    })
+    toast.warning("Invalid entries copied to clipboard")
   }
 
   // ============= RENDER =============
@@ -901,7 +852,7 @@ export function CustomClaimUploader({
                     className="mt-2 text-xs min-h-[36px] w-full sm:w-auto"
                     onClick={() => {
                       navigator.clipboard.writeText(extractedText)
-                      toast({ title: "Copied to clipboard" })
+                      toast.success("Copied to clipboard")
                     }}
                   >
                     <Copy className="h-3 w-3 mr-1" />

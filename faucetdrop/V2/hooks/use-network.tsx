@@ -29,6 +29,12 @@ export interface Network {
     decimals: number
   }
   isTestnet?: boolean
+defaultTokens?: {
+    address: string;
+    name: string;
+    symbol: string;
+    decimals: number;
+  }[];
 }
 
 export const networks: Network[] = [
@@ -56,7 +62,7 @@ export const networks: Network[] = [
       droplist: "0xF8707b53a2bEc818E96471DDdb34a09F28E0dE6D",
       dropcode: "0x8D1306b3970278b3AB64D1CE75377BDdf00f61da",
       custom: "0x8cA5975Ded3B2f93E188c05dD6eb16d89b14aeA5",
-      quest: "",
+      quest: "0xdC9b027B6453560ce8C4390E0B609b343a8eBd62",
       quiz: ""
     },
     tokenAddress: "0x471EcE3750Da237f93B8E339c536989b8978a438",
@@ -158,7 +164,37 @@ export const networks: Network[] = [
       decimals: 18,
     },
     isTestnet: false,
-  }
+  },
+{
+    name: "BNB",
+    symbol: "BNB",
+    chainId: 56,
+    rpcUrl: "https://bnb-mainnet.g.alchemy.com/v2/sXHCrL5-xwYkPtkRC_WTEZHvIkOVTbw-",
+    blockExplorerUrls: "https://bscscan.com",
+    explorerUrl: "https://bscscan.com",
+    color: "#F3BA2F",
+    logoUrl: "/bnb.jpg",
+    iconUrl: "/bnb.jpg",
+    factoryAddresses: [
+      "0xFE7DB2549d0c03A4E3557e77c8d798585dD80Cc1", // Replace with your actual BSC factory addresses
+      "0x0F779235237Fc136c6EE9dD9bC2545404CDeAB36",
+      "0x4B8c7A12660C4847c65662a953F517198fBFc0ED"
+    ],
+    factories: {
+      droplist: "0x4B8c7A12660C4847c65662a953F517198fBFc0ED",
+      dropcode: "0xFE7DB2549d0c03A4E3557e77c8d798585dD80Cc1",
+      custom: "0x0F779235237Fc136c6EE9dD9bC2545404CDeAB36",
+      quest: "",
+      quiz: ""
+    },
+    tokenAddress: ZeroAddress,
+    nativeCurrency: {
+      name: "BNB",
+      symbol: "BNB",
+      decimals: 18,
+    },
+    isTestnet: false,
+}
 ]
 
 interface NetworkContextType {

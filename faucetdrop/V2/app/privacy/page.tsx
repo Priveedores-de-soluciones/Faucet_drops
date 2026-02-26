@@ -34,7 +34,7 @@ export default function PrivacyPage() {
               <section className="mb-8">
                 <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-4">1. Introduction</h2>
                 <p className="text-slate-700 dark:text-slate-300 mb-4">
-                  FaucetDrops ("we," "us," or "our") operates faucetdrops.io and is committed to protecting your privacy. This Privacy Policy explains how we collect, use, share, and protect your personal information when you use our website or services ("Service").
+                  FaucetDrops ("we," "us," or "our") operates FaucetDrops.io and is committed to protecting your privacy. This Privacy Policy explains how we collect, use, share, and protect your personal information when you use our website or services ("Service").
                 </p>
               </section>
 

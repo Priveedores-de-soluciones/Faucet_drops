@@ -1,12 +1,13 @@
 'use client'
-import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
+import gsap from 'gsap';
+import SplitText from 'gsap/SplitText';
 
 const KnowFaucetDrops = () => {
-  const [displayText, setDisplayText] = useState('');
+  const textRef = useRef<HTMLParagraphElement | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const splitRef = useRef<any>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [, setCycleComplete] = useState(false);
-  const cycleCount = useRef(0);
 
   const texts = useMemo(() => [
     "Web3 teams want to grow",
@@ -15,60 +16,73 @@ const KnowFaucetDrops = () => {
     "FaucetDrops Unifies Everything..."
   ], []);
 
-  const handleCycleComplete = useCallback(() => {
-    setCycleComplete(true);
-    setTimeout(() => setCycleComplete(false), 1000);
-  }, []);
-
   useEffect(() => {
-    let timeout: NodeJS.Timeout;
-    const currentText = texts[currentIndex];
-
-    if (!isDeleting) {
-      // Typing effect
-      if (displayText.length < currentText.length) {
-        timeout = setTimeout(() => {
-          setDisplayText(currentText.substring(0, displayText.length + 1));
-        }, 10); // Slightly faster typing
-      } else {
-        // Pause at the end of typing
-        timeout = setTimeout(() => {
-          setIsDeleting(true);
-        }, 1000); // Slightly longer pause
-      }
-    } else {
-      // Deleting effect
-      if (displayText.length > 0) {
-        timeout = setTimeout(() => {
-          setDisplayText(displayText.substring(0, displayText.length - 1));
-        }, 20); // Slightly faster deleting
-      } else {
-        // Move to next text
-        const nextIndex = (currentIndex + 1) % texts.length;
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setCurrentIndex(nextIndex);
-        setIsDeleting(false);
-        
-        // Check if we've completed a full cycle
-        if (nextIndex === 0) {
-          cycleCount.current += 1;
-          handleCycleComplete();
+    if (!textRef.current) return;
+  
+    const ctx = gsap.context(() => {
+      const animateText = () => {
+        // Clean previous split
+        if (splitRef.current) {
+          splitRef.current.revert();
         }
-        
-      }
-    }
-
-    return () => clearTimeout(timeout);
-  }, [displayText, currentIndex, isDeleting, texts, handleCycleComplete]);
+  
+        // Insert new text
+        textRef.current!.textContent = texts[currentIndex];
+  
+        // Split into chars
+        splitRef.current = SplitText.create(textRef.current, {
+          type: "chars,words"
+        });
+  
+        // Animate in
+        gsap.from(splitRef.current.chars, {
+          y: 80,
+          opacity: 0,
+          duration: 0.6,
+          ease: "power4.out",
+          stagger: 0.02,
+          onComplete: () => {
+            // Pause before next text
+            gsap.delayedCall(1.2, () => {
+              // Animate out
+              gsap.to(splitRef.current.chars, {
+                y: -40,
+                opacity: 0,
+                duration: 0.4,
+                ease: "power2.in",
+                stagger: 0.015,
+                onComplete: () => {
+                  setCurrentIndex((prev) => (prev + 1) % texts.length);
+                }
+              });
+            });
+          }
+        });
+      };
+  
+      animateText();
+    });
+  
+    return () => ctx.revert();
+  }, [currentIndex, texts]);
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 py-16 relative overflow-hidden md:col-span-2 order-2 md:order-1">
       <div className="relative z-10">
-        <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold leading-tight mb-8 md:items-center">
+        <h1 className="quote text-4xl sm:text-5xl md:text-6xl font-bold leading-tight mb-8 md:items-center">
           Why FaucetDrops?
         </h1>
 
-        <div className="min-h-[120px] flex flex-col">
+        <p
+  ref={textRef}
+  className={`min-h-[80px] ${
+    currentIndex === texts.length - 1
+      ? "text-4xl md:text-5xl font-bold text-[#0052FF]"
+      : "text-2xl md:text-3xl text-gray-200 font-semibold"
+  }`}
+></p>
+
+        {/* <div className="min-h-[120px] flex flex-col">
           {currentIndex === texts.length - 1 ? (
             <p className="text-4xl md:text-5xl font-bold text-[#0052FF] mb-6">
               {displayText}
@@ -84,7 +98,7 @@ const KnowFaucetDrops = () => {
               </span>
             </p>
           )}
-        </div>
+        </div> */}
       </div>
     </div>
   );

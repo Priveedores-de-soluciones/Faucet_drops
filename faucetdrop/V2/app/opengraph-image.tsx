@@ -87,7 +87,7 @@ export default async function Image() {
             zIndex: 10,
           }}
         >
-          faucetdrops.io
+          FaucetDrops.io
         </div>
       </div>
     ),
