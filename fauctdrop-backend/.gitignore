@@ -27,3 +27,4 @@ Thumbs.db
 *.log
 debug_fail_*.pngsrc/twitter_auth.json
 src/twitter_auth.json
+venv/

@@ -1,36 +1,46 @@
-import os
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.declarative import declarative_base # or from .orm import declarative_base
+"""
+database.py — asyncpg connection pool lifecycle.
+Call `init_pool()` on startup and `close_pool()` on shutdown.
+"""
+from __future__ import annotations
 
-# --- Supabase Configuration ---
-# You MUST set this environment variable in your .env or shell.
-# Format: postgresql+asyncpg://[user]:[password]@[host]:[port]/[db_name]
-# Get this URL from your Supabase Project Settings -> Database -> Connection String
-DATABASE_URL = os.environ.get("DATABASE_URL") 
+import asyncpg
+import logging
+from typing import Optional
 
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is not set for Supabase connection.")
+from config import DATABASE_URL
 
-# Supabase uses asyncpg as the PostgreSQL driver
-engine = create_async_engine(DATABASE_URL, echo=False)
+logger = logging.getLogger(__name__)
 
-# The base class for your ORM models
-Base = declarative_base() 
+# Module-level pool singleton — set by init_pool()
+pool: Optional[asyncpg.Pool] = None
 
-AsyncSessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
 
-# Database Dependency for FastAPI routes
-async def get_db():
-    """Provides an async database session."""
-    async with AsyncSessionLocal() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+async def init_pool() -> asyncpg.Pool:
+    """Create and return the asyncpg connection pool."""
+    global pool
+    pool = await asyncpg.create_pool(
+        DATABASE_URL,
+        min_size=2,
+        max_size=10,
+        command_timeout=60,
+        statement_cache_size=0,
+    )
+    logger.info("✅ asyncpg pool created (%s)", DATABASE_URL.split("@")[-1])
+    return pool
+
+
+async def close_pool() -> None:
+    """Gracefully close the connection pool."""
+    global pool
+    if pool:
+        await pool.close()
+        pool = None
+        logger.info("asyncpg pool closed")
+
+
+def get_pool() -> asyncpg.Pool:
+    """Return the live pool; raise RuntimeError if not initialised."""
+    if pool is None:
+        raise RuntimeError("Database pool is not initialised. Call init_pool() first.")
+    return pool
