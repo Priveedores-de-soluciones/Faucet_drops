@@ -1,113 +1,127 @@
 # 💧 FaucetDrops
 
-FaucetDrops is a lightweight, user-friendly platform for crypto and blockchain communities to distribute **ETH, ERC20 tokens, or stablecoins** seamlessly.  
-Built for **events, hackathons, DAOs, and testnet incentives**, it automates token drops with **sybil-resistance, privacy, and cross-chain support**.
+**FaucetDrops** is an automated onchain reward distribution and engagement platform that helps Web3 projects, DAOs, protocols, and communities securely distribute tokens, run targeted reward campaigns, and scale real user growth with smart controls and full transparency.
 
-Prevent bot abuse, ensure fair distribution, and track everything in real-time.  
-Powered by **Self Protocol** for **ZK-powered identity verification**, FaucetDrops makes onboarding faster and more secure—verify users in under a minute without compromising privacy.
+Built for **mainnet**.
 
 ---
 
 ## 🌟 Why FaucetDrops?
 
-Manual token distribution is slow, error-prone, and vulnerable to bots. FaucetDrops solves this with automated, verifiable drops.
+Manual token distribution (spreadsheets, multisig sends, open faucets) is slow, error-prone, expensive, and vulnerable to bots.  
+FaucetDrops fixes this with a **single, secure, automated platform** that guarantees rewards go to the right users.
 
-**Key Benefits:**
-- **Gasless & Fast:** Users claim tokens instantly without fees.
-- **Sybil-Resistant:** ZK proof-of-humanity to ensure real users (no bots).
-- **Customizable Types:** DropCode (code-based), DropList (whitelisted), or Custom (individual amounts).
-- **Social Verification:** Require Twitter follows, Telegram joins, etc.
-- **Multi-Admin:** Collaborate with team members to manage faucets.
-- **Cross-Chain:** Supports Celo, Lisk, Arbitrum, Base, Ethereum, Polygon, and Optimism.
-- **Traceable & Secure:** View history, reset claims, and withdraw unclaimed funds.
-- **Developer-Friendly:** Factory + Instance pattern for scalable smart contracts.
-
----
-
-## 🧩 How It Works
-
-1. **Create a Faucet:** Choose type, set token/ETH, amount, whitelist, and time windows.
-2. **Fund & Configure:** Deposit tokens, set social tasks, and add admins.
-3. **Share & Claim:** Users verify tasks, enter codes (if required), and claim.
-4. **Track & Manage:** Monitor history, reset claims, or delete inactive faucets.
+**Key Benefits**
+- Rewards always go to the correct wallet — no more lost funds
+- Fully gasless claims for users (via Account Abstraction)
+- Built-in protection against bots & sybil attacks
+- Real-time analytics and onchain transparency
+- Multi-admin control + role management
+- One platform for both token distribution **and** engagement (quests)
 
 ---
 
-## ✨ Features
+## ✨ Core Features
 
-| Feature | Description |
-|---------|-------------|
-| **Faucet Types** | DropCode (code-protected), DropList (whitelisted), Custom (per-user amounts). |
-| **Social Tasks** | Require Twitter/Telegram joins with username verification. |
-| **Multi-Admin** | Add/remove admins (owner/factory owner protected). |
-| **Fund/Withdraw** | Deposit ETH/tokens (3% fee); withdraw leftovers post-campaign. |
-| **Time Controls** | Set start/end times; auto-expire. |
-| **Claim Reset** | Allow repeat claims by resetting user status. |
-| **Cross-Chain Tracking** | Prevent double-claims across networks. |
-| **Transaction History** | View activity with pagination. |
-| **Analytics** | Charts for claims, engagement, and distribution metrics. |
-
-**Supported Networks:**  
-Celo (CELO, cUSD, cEUR, $G), Lisk (LISK), Arbitrum (ETH), Base (ETH), Ethereum (ETH), Polygon (MATIC), Optimism (ETH).
+- **Faucet Types**: Open (DropCode), Whitelist, Custom
+- **Quest & Engagement Module**: Create tasks/quiz → auto-reward winners
+- **Chain-Specific Tokens**: Every chain has its native/popular tokens pre-integrated (USDT, AUSD, cUSD, etc.)
+- **Fees**: Automatic 2% backend + 1% vault fee on funding
+- **Admin Controls**: Multi-admin, claim reset (single/batch/all), pause, delete faucet, name update
+- **Time Controls**: Start/end dates with automatic enforcement
+- **Analytics Dashboard**: Live claims, balance, transaction history
+- **Security**: ReentrancyGuard, time-locks, ownership checks, batch claiming
+- **Wallet Connection**: Privy (one-click, social login)
 
 ---
 
-## 💬 Use Cases
+## 📊 Live Stats & Traction (as of Feb 2026)
 
-- **Events/Hackathons:** Onboard attendees with instant tokens.
-- **Airdrops:** Fair, verifiable distributions without manual sends.
-- **Community Rewards:** Whitelist loyal members or require social tasks.
-- **Testnet Incentives:** Distribute test tokens securely to devs/testers.
-- **UBI/DAOs:** Custom payouts (e.g., $G on Celo).
-
----
-
-## 🛠 Technical Architecture
-
-**Smart Contracts:**
-- **Factory:** Deploys new faucet instances.
-- **Instances:** Handle claims (DropCode, DropList, Custom).
-- **Storage:** Tracks claims cross-chain.
-
-**Tokens:** ETH, ERC20, stablecoins via Mento.  
-**Security:** Reentrancy guards, admin controls, time-locks, audited.  
-**Integrations:** Self Protocol (ZKPoH), WalletConnect.  
-**Gas Optimization:** Batch whitelist/custom amount updates.
-
-**Frontend:** Next.js + ethers.js (MetaMask, etc.)  
-**Backend:** Node.js for off-chain tasks (code generation, social verification).
+- 100+ faucets created
+- 2,000+ active users
+- 2,000+ onchain claims
+- 9,000+ Transactions
+- 4.9/5 user satisfaction
+- Official tooling partner for **Proof of Ship**
+- Top 5 project in **Celo Africa DAO Incubator Season 3**
+- Trusted by **Celo**, **Lisk**, and **Self Protocol**
 
 ---
 
-### Example Workflow
-1. Deploy faucet via Factory.
-2. Configure type, fund, set tasks.
-3. Users verify & claim.
-4. Admins track, withdraw, reset.
+## 🚀 How It Works
+
+### Admin / Project Owner Journey
+1. Go to [app.faucetdrops.io](https://app.faucetdrops.io)
+2. Click **Create Faucet**
+3. Select Faucet type (DropCode / Whitelist / Custom)
+4. Set Name,faucet image, Description and token
+5. Preview and Create Faucet (Automatically Route to Faucet details page)
+6. Fund the contract (approve + deposit)
+7. Set amount, start/end time, rules
+8. Share link or QRcode with drop codes
+9. Monitor everything in real-time dashboard
+
+### User / Recipient Journey
+1. Receive campaign link/QRcode with drop code
+2. Connect wallet with Privy (one click)
+3. Enter drop code or auto-verify (whitelist)
+4. Click **Drop** → gasless transaction
+5. Tokens arrive instantly + onchain receipt
+
+### Quest Journey
+1. Create Quest → define tasks
+2. Fund reward pool
+3. Users complete tasks
+4. Winners claim automatically within window
 
 ---
 
-## 🔒 Security & Protections
+## 🛠 Tech Stack
 
-- **ZK Verification:** Privacy-preserving human checks.
-- **Code/Whitelist:** Restrict claims to authorized users.
-- **Admin Safeguards:** Owner/factory owner can't be removed.
-- **Reentrancy Guards:** Prevent exploits.
-- **Time Locks:** Strict claim windows.
-- **Audited Contracts:** Secure structure for production.
+**Frontend**: Next.js 14 (TypeScript + Tailwind CSS) + Privy + ethers.js  
+**Backend**: Python + FastAPI (drop-code generation, eligibility, quests, analytics API)  
+**Smart Contracts**: Solidity ^0.8.20 + OpenZeppelin (Factory + Instance pattern)  
+**Key Integrations**: Factoy Contract, Privy, Account Abstraction (gasless)
 
 ---
 
-## 🔗 Stay Connected
+## 🌐 Supported Networks (Live)
 
-- **Website:** [faucetdrops.io](https://faucetdrops.io)
-- **Twitter/X:** [@Faucetdrops](https://twitter.com/Faucetdrops)
-- **GitHub:** [github.com/FaucetDrops](https://github.com/FaucetDrops)
-- **Support:** [drops.faucet@gmail.com](mailto:drops.faucet@gmail.com)
-- **Docs:** [faucetdrops.io/docs](https://faucetdrops.io/docs)
+- Celo
+- Lisk
+- Arbitrum
+- Base
+- BNB (Binance Smart Chain)
+- **Avalanche C-Chain** (in progress — Build Games 2026 focu)
+
+---
+
+## 👥 Founders
+
+- **Jeremiah Oyeniran** – Co-Founder & CTO (Smart contract developer, Lead Dev at Blockchain LAUTECH)  
+  LinkedIn: [jerydam](https://linkedin.com/in/jerydam)
+  Twitter: [Jerydam00](https://x.com/jerydam00)
+
+- **John Adekunjo** – Co-Founder (Community & Growth)  
+  LinkedIn: [john-adekunjo](https://linkedin.com/in/john-adekunjo-6757271b5)
+  Twitter: [Johnadek_](https://x.com/johnadek_)
+
+---
+
+## 🔗 Links
+
+- **Live App**: [app.faucetdrops.io](https://app.faucetdrops.io)
+- **Website**: [faucetdrops.io](https://faucetdrops.io)
+- **Twitter/X**: [@Faucetdrops](https://x.com/Faucetdrops)
+- **GitHub**: [priveedores-de-solucione](https://github.com/priveedores-de-solucione/FaucetDrops)
+- **Contact**: DM @Faucetdrops or founders directly
 
 ---
 
 ## 📜 License
 
 MIT License — see [LICENSE](LICENSE) for details.
+
+---
+
+Made with ❤️ for the Web3 ecosystem by priveedores-de-solucione.
