@@ -25,8 +25,7 @@ FaucetDrops fixes this with a **single, secure, automated platform** that guaran
 
 - **Faucet Types**: Open (DropCode), Whitelist, Custom
 - **Quest & Engagement Module**: Create tasks/quiz → auto-reward winners
-- **Chain-Specific Tokens**: Every chain has its native/popular tokens pre-integrated (USDT, AUSD, cUSD, etc.)
-- **Fees**: Automatic 2% backend + 1% vault fee on funding
+- **Chain-Specific Tokens**: Every chain has its native/popular tokens pre-integrated (USDT, USDC, cUSD, etc.)
 - **Admin Controls**: Multi-admin, claim reset (single/batch/all), pause, delete faucet, name update
 - **Time Controls**: Start/end dates with automatic enforcement
 - **Analytics Dashboard**: Live claims, balance, transaction history
@@ -92,7 +91,6 @@ FaucetDrops fixes this with a **single, secure, automated platform** that guaran
 - Arbitrum
 - Base
 - BNB (Binance Smart Chain)
-- **Avalanche C-Chain** (in progress — Build Games 2026 focu)
 
 ---
 
