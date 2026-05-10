@@ -15,15 +15,17 @@ contract QuizReward is Ownable, ReentrancyGuard {
     // Window opens automatically when backend calls setRewardAmountsBatch.
     uint256 public immutable claimWindowDuration; // seconds, set at deploy
     uint256 public claimWindowEnd;                // 0 = not yet opened
-
+    // Add these state variables to your Quest/Quiz contract
+    address[] public uniqueParticipants;
+    mapping(address => bool) public hasParticipated;
     mapping(address => bool) public hasClaimed;
     mapping(address => uint256) public customClaimAmounts;
     mapping(address => bool) public isAdmin;
     address[] public admins;
 
     // ── Two fixed backend addresses, immutable forever ──
-    address public immutable backendA;
-    address public immutable backendB;
+    address public immutable backend;
+   
 
     address public VAULT_ADDRESS = 0x97841b00B8Ad031FB30495eCeF2B2DbB6FCaCE30;
     address public factory;
@@ -31,7 +33,8 @@ contract QuizReward is Ownable, ReentrancyGuard {
     uint256 public constant VAULT_FEE_PERCENT = 3;
     bool public deleted;
     bool public paused;
-
+    bool public isStarted;
+    uint256 public totalSubmissions;
     // ── Quiz participant counter ──
     uint256 public totalParticipants;
     mapping(address => bool) public hasJoined;
@@ -59,6 +62,8 @@ contract QuizReward is Ownable, ReentrancyGuard {
     event NameUpdated(string newName);
     event ParticipantJoined(address indexed participant, uint256 totalParticipants);
     event ClaimWindowOpened(uint256 endsAt);
+    event TaskSubmitted(address indexed participant, uint256 totalSubmissions);
+    event QuizStarted(uint256 timestamp);
 
     // ==========================================
     //          ERRORS
@@ -88,12 +93,12 @@ contract QuizReward is Ownable, ReentrancyGuard {
     // ==========================================
 
     modifier onlyBackend() {
-        if (msg.sender != backendA && msg.sender != backendB) revert OnlyBackend();
+        if (msg.sender != backend) revert OnlyBackend();
         _;
     }
 
     modifier onlyAdmin() {
-        if (msg.sender != backendA && msg.sender != backendB && !isAdmin[msg.sender] && msg.sender != owner() && msg.sender != IFaucetFactory(factory).owner())
+        if (msg.sender != backend && !isAdmin[msg.sender] && msg.sender != owner() && msg.sender != IFaucetFactory(factory).owner())
             revert OnlyAdmin();
         _;
     }
@@ -120,20 +125,18 @@ contract QuizReward is Ownable, ReentrancyGuard {
     constructor(
         string memory _name,
         address _token,
-        address _backendA,
-        address _backendB,
+        address _backend,
         address _owner,
         address _factory,
         uint256 _claimWindowDuration
     ) Ownable(_owner) {
-        if (_backendA == address(0) || _backendB == address(0)) revert InvalidAddress();
+        if (_backend == address(0) ) revert InvalidAddress();
         if (_claimWindowDuration == 0) revert InvalidDuration();
 
         name = _name;
         token = _token;
         factory = _factory;
-        backendA = _backendA;
-        backendB = _backendB;
+        backend = _backend;
         claimWindowDuration = _claimWindowDuration;
 
         isAdmin[_owner] = true;
@@ -179,7 +182,14 @@ contract QuizReward is Ownable, ReentrancyGuard {
         if (hasJoined[participant]) revert AlreadyJoined();
         hasJoined[participant] = true;
         totalParticipants++;
+        _recordParticipant(participant);
         emit ParticipantJoined(participant, totalParticipants);
+    }
+
+    function startQuiz() external onlyBackend whenNotPaused checkNotDeleted {
+    if (isStarted) revert("Quiz already started");
+    isStarted = true;
+    emit QuizStarted(block.timestamp);
     }
 
     // ==========================================
@@ -222,7 +232,10 @@ contract QuizReward is Ownable, ReentrancyGuard {
     // ==========================================
     //          CLAIM (backend only)
     // ==========================================
-
+    function submitQuiz(address participant) external onlyBackend whenNotPaused checkNotDeleted {
+        totalSubmissions++;
+        emit TaskSubmitted(participant, totalSubmissions);
+    }
     /**
      * @notice Backend passes the winner's address. Contract verifies they are
      *         whitelisted (customClaimAmounts > 0) before transferring.
@@ -260,6 +273,12 @@ contract QuizReward is Ownable, ReentrancyGuard {
     // ==========================================
     //          VIEW HELPERS
     // ==========================================
+    function _recordParticipant(address user) internal {
+    if (!hasParticipated[user]) {
+        hasParticipated[user] = true;
+        uniqueParticipants.push(user);
+    }
+}
 
     function getClaimStatus(address user) external view checkNotDeleted returns (
         bool claimed,
@@ -289,7 +308,7 @@ contract QuizReward is Ownable, ReentrancyGuard {
             vaultFee   = (msg.value * VAULT_FEE_PERCENT)   / 100;
 
             if (backendFee > 0) {
-                (bool s, ) = backendA.call{value: backendFee}("");
+                (bool s, ) = backend.call{value: backendFee}("");
                 if (!s) revert TransferFailed();
             }
             if (vaultFee > 0 && VAULT_ADDRESS != address(0)) {
@@ -305,7 +324,7 @@ contract QuizReward is Ownable, ReentrancyGuard {
             vaultFee   = (_tokenAmount * VAULT_FEE_PERCENT)   / 100;
 
             if (backendFee > 0) {
-                if (!IERC20(token).transferFrom(msg.sender, backendA, backendFee)) revert TransferFailed();
+                if (!IERC20(token).transferFrom(msg.sender, backend, backendFee)) revert TransferFailed();
             }
             if (vaultFee > 0 && VAULT_ADDRESS != address(0)) {
                 if (!IERC20(token).transferFrom(msg.sender, VAULT_ADDRESS, vaultFee)) revert TransferFailed();
@@ -342,13 +361,17 @@ contract QuizReward is Ownable, ReentrancyGuard {
         IFaucetFactory(factory).recordTransaction(address(this), "UpdateName", msg.sender, 0, false);
         emit NameUpdated(_newName);
     }
+    
+    function getUniqueParticipants() external view returns (address[] memory) {
+    return uniqueParticipants;
+}
 
     receive() external payable whenNotPaused checkNotDeleted {
         if (token != address(0)) revert InvalidAmount();
         uint256 backendFee = (msg.value * BACKEND_FEE_PERCENT) / 100;
         uint256 vaultFee   = (msg.value * VAULT_FEE_PERCENT)   / 100;
         if (backendFee > 0) {
-            (bool s, ) = backendA.call{value: backendFee}("");
+            (bool s, ) = backend.call{value: backendFee}("");
             if (!s) revert TransferFailed();
         }
         if (vaultFee > 0 && VAULT_ADDRESS != address(0)) {

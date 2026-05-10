@@ -5,7 +5,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "./FaucetFactoryLibrary.sol";
 import "./TransactionLibrary.sol";
 import "./IFaucetFactory.sol";
-import "./QuizReward.sol";
+import "./quizFaucet.sol";
 
 contract QuizRewardFactory is Ownable, IFaucetFactory {
     using FaucetFactoryLibrary for FaucetFactoryLibrary.Storage;
@@ -18,8 +18,7 @@ contract QuizRewardFactory is Ownable, IFaucetFactory {
         address indexed owner,
         string name,
         address token,
-        address backendA,
-        address backendB,
+        address backend,
         uint256 claimWindowDuration  // seconds — mirrors what the contract stores
     );
 
@@ -29,23 +28,17 @@ contract QuizRewardFactory is Ownable, IFaucetFactory {
         return Ownable.owner();
     }
 
-    /**
-     * @param _claimWindowDuration  Seconds winners have to claim after setRewardAmountsBatch
-     *                              is called. Save this value in your backend at quiz creation
-     *                              time — it's the same value you stored when creating the quiz.
-     */
+    
     function createQuizReward(
         string memory _name,
         address _token,
-        address _backendA,
-        address _backendB,
+        address _backend,
         uint256 _claimWindowDuration
     ) external returns (address) {
         QuizReward quizReward = new QuizReward(
             _name,
             _token,
-            _backendA,
-            _backendB,
+            _backend,
             msg.sender,
             address(this),
             _claimWindowDuration
@@ -62,8 +55,7 @@ contract QuizRewardFactory is Ownable, IFaucetFactory {
             msg.sender,
             _name,
             _token,
-            _backendA,
-            _backendB,
+            _backend,
             _claimWindowDuration
         );
         return quizAddress;
