@@ -196,16 +196,18 @@ const Drops: React.FC = () => {
         ))}
       </div>
 
+      
       {/* Main Faucet Image */}
       <div 
         ref={imageRef}
         className="relative w-full h-full z-10"
         style={{
           transform: 'scale(0.9)',
+          maskImage: 'linear-gradient(to right, rgba(255, 255, 255, 1) 0%, rgba(255, 255, 255, 0) 100%)', 
         }}
       >
         <Image
-          src="/dripin.png"
+          src="/dripin2.png"
           alt="DripIn Icon"
           width={800}
           height={800}

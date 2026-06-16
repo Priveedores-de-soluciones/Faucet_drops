@@ -28,7 +28,7 @@ mapping(address => bool) public hasParticipated;
 
 
 
-    // ── Fee Settings (Using Basis Points for 0.5%) ──
+    // ── Fee Settings (Using Basis Points for 1%) ──
     // 10000 BPS = 100%. 100 BPS = 1%.
     uint256 public constant BACKEND_FEE_BPS = 100; 
     uint256 public constant BPS_DENOMINATOR = 10000;
@@ -243,7 +243,7 @@ mapping(address => bool) public hasParticipated;
         if (token == address(0)) {
             if (msg.value == 0) revert InvalidAmount();
             
-            // Calculate 0.5% fee
+            // Calculate 1% fee
             backendFee = (msg.value * BACKEND_FEE_BPS) / BPS_DENOMINATOR;
 
             if (backendFee > 0 && backend != address(0)) {
@@ -258,7 +258,7 @@ mapping(address => bool) public hasParticipated;
             if (_tokenAmount == 0) revert InvalidAmount();
             if (msg.value != 0) revert InvalidAmount();
             
-            // Calculate 0.5% fee
+            // Calculate 1% fee
             backendFee = (_tokenAmount * BACKEND_FEE_BPS) / BPS_DENOMINATOR;
 
             if (backendFee > 0 && backend != address(0)) {

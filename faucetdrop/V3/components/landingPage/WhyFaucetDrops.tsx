@@ -18,22 +18,22 @@ const KnowFaucetDrops = () => {
 
   useEffect(() => {
     if (!textRef.current) return;
-  
+
     const ctx = gsap.context(() => {
       const animateText = () => {
         // Clean previous split
         if (splitRef.current) {
           splitRef.current.revert();
         }
-  
+
         // Insert new text
         textRef.current!.textContent = texts[currentIndex];
-  
+
         // Split into chars
         splitRef.current = SplitText.create(textRef.current, {
           type: "chars,words"
         });
-  
+
         // Animate in
         gsap.from(splitRef.current.chars, {
           y: 80,
@@ -59,10 +59,10 @@ const KnowFaucetDrops = () => {
           }
         });
       };
-  
+
       animateText();
     });
-  
+
     return () => ctx.revert();
   }, [currentIndex, texts]);
 
@@ -74,31 +74,12 @@ const KnowFaucetDrops = () => {
         </h1>
 
         <p
-  ref={textRef}
-  className={`min-h-[80px] ${
-    currentIndex === texts.length - 1
-      ? "text-4xl md:text-5xl font-bold text-[#0052FF]"
-      : "text-2xl md:text-3xl text-gray-200 font-semibold"
-  }`}
-></p>
-
-        {/* <div className="min-h-[120px] flex flex-col">
-          {currentIndex === texts.length - 1 ? (
-            <p className="text-4xl md:text-5xl font-bold text-[#0052FF] mb-6">
-              {displayText}
-              <span className={`inline-block ${displayText.length > 0 ? 'opacity-100' : 'opacity-0'}`}>
-                <span className="animate-pulse">|</span>
-              </span>
-            </p>
-          ) : (
-            <p className="text-2xl md:text-3xl text-gray-200 font-semibold tracking-wide mb-6">
-              {displayText}
-              <span className={`inline-block ${displayText.length > 0 ? 'opacity-100' : 'opacity-0'}`}>
-                <span className="animate-pulse text-[#0052FF]">|</span>
-              </span>
-            </p>
-          )}
-        </div> */}
+          ref={textRef}
+          className={`min-h-[80px] ${currentIndex === texts.length - 1
+              ? "text-4xl md:text-5xl font-bold text-[#0052FF]"
+              : "text-2xl md:text-3xl text-gray-200 font-semibold"
+            }`}
+        ></p>
       </div>
     </div>
   );
@@ -109,9 +90,22 @@ const WhyFaucetDrops = () => {
     <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-10 w-full py-12 md:px-10 pt-24 md:pt-50 text-white">
       <KnowFaucetDrops />
       <div className="relative w-full max-w-4xl h-[400px] flex items-center justify-center 1 order-1 md:order-2">
-        {/* <div className="absolute inset-0 bg-[url('/water-fall-water.gif')] bg-cover bg-center" /> */}
-        <div className="relative z-10 w-[300px] h-[300px] md:w-[500px] md:h-[500px]">
+
+        {/* <div className="relative z-10 w-[400px] h-[400px] md:w-[600px] md:h-[600px]">
           <div 
+            className="w-full h-full"
+            style={{
+              backgroundColor: 'transparent',
+              backgroundImage: 'url(/dripin1.png)', 
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              maskImage: 'radial-gradient(circle, rgba(74, 144, 255, 0.6) 0%, rgba(0, 229, 255, 0.3) 30%, rgba(0, 229, 255, 0.1) 60%, transparent 100%)',
+            }}
+          />
+        </div> */}
+
+        <div className="relative z-10 w-[300px] h-[300px] md:w-[500px] md:h-[500px]">
+          <div
             className="w-full h-full"
             style={{
               WebkitMaskImage: 'url(/favicon.png)',
@@ -123,7 +117,7 @@ const WhyFaucetDrops = () => {
               maskRepeat: 'no-repeat',
               maskPosition: 'center',
               backgroundColor: 'transparent',
-              backgroundImage: 'url(/water1.gif)', 
+              backgroundImage: 'url(/dripin1.png)', // previously use  water1.gif
               backgroundSize: 'cover',
               backgroundPosition: 'center'
             }}

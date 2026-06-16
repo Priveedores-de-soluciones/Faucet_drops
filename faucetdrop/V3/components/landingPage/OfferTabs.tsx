@@ -251,7 +251,7 @@ export default function OfferTabs() {
                     id: 5,
                     title: "Quizzes",
                     desc: "Set up interactive, time-based, AI-powered Web3 quizzes tied directly to onchain rewards",
-                    path: "/quizzes"
+                    path: "/quiz"
                   }}
                   // openCard={openCard}
                   // setOpenCard={setOpenCard}

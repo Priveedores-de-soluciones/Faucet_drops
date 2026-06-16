@@ -58,8 +58,13 @@ export function TokenBalance({
         return
       }
 
-      // Create a dedicated provider for this network
-      const provider = new JsonRpcProvider(network.rpcUrl)
+      // Safely extract the first RPC URL whether it's a string or array
+      const safeRpcUrl = Array.isArray(network.rpcUrl) 
+        ? network.rpcUrl[0] 
+        : network.rpcUrl;
+
+      // Create a dedicated provider for this network using the safe URL
+      const provider = new JsonRpcProvider(safeRpcUrl)
 
       let balanceValue
 
@@ -72,7 +77,10 @@ export function TokenBalance({
         balanceValue = await tokenContract.balanceOf(address)
       }
 
-      setBalance(formatUnits(balanceValue, tokenDecimals))
+      // 💡 FIX: Format to units, then parse to float and fix to 2 decimal places
+      const formattedBalance = formatUnits(balanceValue, tokenDecimals)
+      setBalance(parseFloat(formattedBalance).toFixed(4))
+
     } catch (error) {
       console.error("Error fetching token balance:", error)
       setBalance("Error")
@@ -95,7 +103,7 @@ export function TokenBalance({
             <span className="text-sm text-red-500">{error}</span>
           ) : (
             <span className="font-bold">
-              {balance || "0"} {tokenSymbol}
+              {balance || "0.00"} {tokenSymbol}
             </span>
           )}
         </div>

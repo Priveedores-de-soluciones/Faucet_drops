@@ -13,7 +13,7 @@ const Footer = () => {
       links: [
         { name: 'Faucets', href: 'https://app.faucetdrops.io/faucet/create-faucet', external: true },
         { name: 'Quests', href: '/quest', external: false },
-        { name: 'Quizzes', href: '/coming-soon' },
+        { name: 'Quizzes', href: '/quiz' },
         { name: 'Enterprise', href: '/coming-soon' },
       ],
     },
@@ -22,8 +22,9 @@ const Footer = () => {
       links: [
         { name: 'About Us', href: '/aboutUs' },
         { name: 'Careers', href: '/coming-soon' },
-        { name: 'Blog', href: '/coming-soon' },
-        { name: 'Press', href: '/coming-soon' },
+        { name: 'Blog', href: '/blogs' },
+        { name: 'Pricing', href: '/pricing' },
+        
       ],
     },
     {
@@ -39,7 +40,7 @@ const Footer = () => {
 
   const socialLinks = [
     { icon: <SimpleIcon icon={siX} size={20} />, href: 'https://x.com/faucetdrops', label: 'Twitter' },
-    { icon: <SimpleIcon icon={siGithub} size={20} />, href: 'https://github.com/Priveedores-de-soluciones/Faucet_drops', label: 'GitHub' },
+    { icon: <SimpleIcon icon={siGithub} size={20} />, href: 'https://github.com/priveedores-de-solucione/FaucetDrops', label: 'GitHub' },
     { icon: <SimpleIcon icon={siTelegram} size={20} />, href: 'https://t.me/faucetdropschat', label: 'Telegram' },
     { icon: <SimpleIcon icon={siGmail} size={20} />, href: 'mailto:drops.faucet@gmail.com', label: 'Email' },
     { icon: <SimpleIcon icon={siYoutube} size={20} />, href: 'https://www.youtube.com/@Faucet_Drops', label: 'Youtube' },
@@ -111,13 +112,13 @@ const Footer = () => {
             &copy; {new Date().getFullYear()} FaucetDrops. All rights reserved.
           </p>
           <div className="flex flex-wrap justify-center md:justify-end gap-4 mt-4 md:mt-0">
-            <Link href="/legal/privacy" className="text-sm hover:text-[#2563EB] transition-colors">
+            <Link href="/privacy" className="text-sm hover:text-[#2563EB] transition-colors">
               Privacy Policy
             </Link>
-            <Link href="/legal/terms" className="text-sm hover:text-[#2563EB] transition-colors">
+            <Link href="/terms" className="text-sm hover:text-[#2563EB] transition-colors">
               Terms of Service
             </Link>
-            <Link href="/legal/cookie-policy" className="text-sm hover:text-[#2563EB] transition-colors">
+            <Link href="/cookie-policy" className="text-sm hover:text-[#2563EB] transition-colors">
               Cookie Policy
             </Link>
           </div>

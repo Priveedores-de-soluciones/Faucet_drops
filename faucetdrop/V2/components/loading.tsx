@@ -41,7 +41,7 @@ const LoadingPage = () => {
           </div>
           {/* Updated: Text color adapts to light/dark mode */}
           <p className="text-gray-600 dark:text-gray-300 mt-2 text-sm font-medium">
-            Loading your faucet experience...
+            Loading your experience On FaucetDrops...
           </p>
         </div>
       </div>

@@ -47,7 +47,7 @@ const Header = () => {
             ]
           },
           { name: 'Quests', href: '/quest/', icon: <PackageCheck />, description: 'Gamified Progress + Automated Rewards' },
-          { name: 'Quizzes', href: 'https://app.faucetdrops.io/quiz/', icon: <GraduationCap />, description: 'Fun, Interactive, AI-Powered Web3 Quiz Engine' },
+          { name: 'Quizzes', href: '/quiz/', icon: <GraduationCap />, description: 'Fun, Interactive, AI-Powered Web3 Quiz Engine' },
           { name: 'Enterprise', href: 'https://app.faucetdrops.io/enterprise/', icon: <Landmark />, description: 'White Label Solutions' },
           // href: '/product/quests' // path to follow
         ]
@@ -57,7 +57,7 @@ const Header = () => {
         dropdown: [
           { name: 'Documentation', href: '/coming-soon', icon: <FileMinus />, description: 'A comprehensive guide for seamless integration' },
           // href: '/developers/docs' // path to follow
-          { name: 'GitHub', href: 'https://github.com/Priveedores-de-soluciones/Faucet_drops', target: '_blank', icon: <Github />, description: 'Explore our open-source projects' },
+          { name: 'GitHub', href: 'https://github.com/priveedores-de-solucione/FaucetDrops', target: '_blank', icon: <Github />, description: 'Explore our open-source projects' },
         ]
       },
       {
@@ -66,7 +66,7 @@ const Header = () => {
           { name: 'About', href: '/aboutUs', icon: <Info />, description: 'Learn more about our company' },
           { name: 'Career', href: '/coming-soon', icon: <Briefcase />, description: 'Explore career opportunities' },
           { name: 'Brand kit', href: '/coming-soon', icon: <PaintRoller />, description: 'Download our brand kit' },
-          // ref: '/company/about' // path to follow
+          { name: 'Pricing', href: '/pricing', icon: <Info />, description: 'View our pricing plans' },
         ]
       },
     ];
@@ -220,7 +220,7 @@ const Header = () => {
 
         {/* Mobile Menu */}
         <div
-          className={`md:hidden transition-all duration-300 ease-in-out overflow-hidden ${isMenuOpen ? 'max-h-[600px] mt-3 pb-3' : 'max-h-0'
+          className={`md:hidden transition-all duration-300 ease-in-out overflow-hidden ${isMenuOpen ? 'max-h-150 mt-3 pb-3' : 'max-h-0'
             }`}
         >
           <div className="flex flex-col space-y-3 pt-3 border-t border-gray-800">

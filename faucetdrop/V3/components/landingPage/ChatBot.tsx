@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useEffect, useRef } from 'react';
 import { MessageCircle, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import ReactMarkdown from 'react-markdown';
 
 const QUICK_REPLIES = [
     { label: "🚀 Launch a Faucet", value: "How do I create and launch a faucet campaign?" },
@@ -121,9 +122,9 @@ export default function ChatBot() {
     };
 
     return (
-        <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end space-y-2">
+        <div className="fixed bottom-6 right-6 z-100 flex flex-col items-end space-y-2">
             {isOpen && (
-                <div className="w-4/5 h-[600px] rounded-lg    md:rounded-3xl border border-white/10 shadow-2xl bg-black/40 backdrop-blur-xl overflow-hidden flex flex-col relative">
+                <div className="w-4/5 md:w-[500px] h-[600px] rounded-lg    md:rounded-3xl border border-white/10 shadow-2xl bg-black/40 backdrop-blur-xl overflow-hidden flex flex-col relative">
 
                     {/* Header */}
                     <div className="p-4 border-b border-white/10 bg-white/5 flex items-center justify-between">
@@ -154,7 +155,9 @@ export default function ChatBot() {
                                 </div>
                                 <div className={`p-4 rounded-2xl text-sm leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-none' : 'bg-white/10 text-white/90 rounded-tl-none'
                                     }`}>
-                                    {msg.text}
+                                    <ReactMarkdown>
+                                        {msg.text}
+                                    </ReactMarkdown>
                                 </div>
                             </motion.div>
                         ))}

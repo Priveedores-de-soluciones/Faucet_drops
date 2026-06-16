@@ -23,6 +23,8 @@ interface QRCodeShareDialogProps {
   faucetMetadata: any;
   selectedNetwork: any;
   tokenSymbol: string;
+  faucetType?: string;
+  secretCode?: string;
 }
 
 // ─── Canvas helpers ───────────────────────────────────────────────────────────
@@ -77,7 +79,6 @@ const drawSparkle = (
   ctx.restore();
 };
 
-/** Draw a glossy ice-blue shield with a white checkmark inside */
 const drawIceShield = (
   ctx: CanvasRenderingContext2D,
   cx: number, cy: number, size: number
@@ -133,7 +134,6 @@ const drawIceShield = (
   ctx.restore();
 };
 
-/** Draw a glossy ice-blue coin with a star */
 const drawIceCoin = (
   ctx: CanvasRenderingContext2D,
   cx: number, cy: number, r: number
@@ -179,7 +179,6 @@ const drawIceCoin = (
   ctx.restore();
 };
 
-/** Draw a glossy ice-blue gift box */
 const drawIceGift = (
   ctx: CanvasRenderingContext2D,
   cx: number, cy: number, size: number
@@ -242,7 +241,6 @@ const drawIceGift = (
   ctx.restore();
 };
 
-/** Draw a glossy ice-blue wallet */
 const drawIceWallet = (
   ctx: CanvasRenderingContext2D,
   cx: number, cy: number, size: number
@@ -305,11 +303,15 @@ async function renderMarketingCard(
     networkName: string;
     networkLogoUrl: string;
     logoPath: string;
+    isDropCode?: boolean;
+    secretCode?: string;
     outputSize?: { w: number; h: number };
   }
 ): Promise<HTMLCanvasElement> {
+  // ── Canvas size — extra height when drop code is shown ────────────────
   const W = opts.outputSize?.w ?? 1080;
-  const H = opts.outputSize?.h ?? 1240;
+  const dropCodeExtraH = opts.isDropCode ? (opts.outputSize?.w ?? 1080) / 1080 * 180 : 0;
+  const H = (opts.outputSize?.h ?? 1240) + dropCodeExtraH;
   const scale = W / 1080;
 
   const out = document.createElement("canvas");
@@ -361,7 +363,7 @@ async function renderMarketingCard(
     loadImg(opts.logoPath),
   ]);
 
-  // ── Branding top (logo only, no circle) ───────────────────────────────
+  // ── Branding top ──────────────────────────────────────────────────────
   const brandCy = 0.054 * H;
   if (logoImg) {
     const lh = 72 * scale;
@@ -470,7 +472,7 @@ async function renderMarketingCard(
   ctx.textAlign = "center";
   ctx.fillText("CLAIM NOW!", W / 2, badgeY + badgeH * 0.66);
 
-  // ── QR Code — always drawn as a square ────────────────────────────────
+  // ── QR Code ────────────────────────────────────────────────────────────
   const qrSz  = 280 * scale;
   const qrX   = (W - qrSz) / 2;
   const qrY2  = badgeY + badgeH + 50 * scale;
@@ -482,7 +484,7 @@ async function renderMarketingCard(
   roundRect(ctx, qrX - qrPad, qrY2 - qrPad, qrSz + qrPad * 2, qrSz + qrPad * 2, 24 * scale);
   ctx.fill();
   ctx.shadowBlur = 0;
-  ctx.drawImage(qrCanvas, qrX, qrY2, qrSz, qrSz); // explicit square draw
+  ctx.drawImage(qrCanvas, qrX, qrY2, qrSz, qrSz);
 
   // ── Network badge ──────────────────────────────────────────────────────
   const netLabel = opts.networkName || "Mainnet";
@@ -521,6 +523,47 @@ async function renderMarketingCard(
     netBY + netBH / 2 + 14 * scale
   );
 
+  // ── Drop Code Badge ────────────────────────────────────────────────────
+  if (opts.isDropCode && opts.secretCode) {
+    const dcY = netBY + netBH + 36 * scale;
+
+    // Label
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(255,255,255,0.75)";
+    ctx.font = `600 ${30 * scale}px sans-serif`;
+    ctx.fillText("DROP CODE", W / 2, dcY);
+
+    // Measure pill width based on the code text
+    const codeText = opts.secretCode;
+    ctx.font = `900 ${62 * scale}px monospace`;
+    const codeW = ctx.measureText(codeText).width + 80 * scale;
+    const codeH = 110 * scale;
+    const codeX = (W - codeW) / 2;
+    const codeY = dcY + 16 * scale;
+
+    // Pill background
+    ctx.fillStyle = "rgba(255,255,255,0.92)";
+    ctx.shadowColor = "rgba(0,0,0,0.18)";
+    ctx.shadowBlur = 20 * scale;
+    roundRect(ctx, codeX, codeY, codeW, codeH, codeH / 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Code text
+    ctx.fillStyle = "#0369a1";
+    ctx.font = `900 ${62 * scale}px monospace`;
+    ctx.textAlign = "center";
+    ctx.fillText(codeText, W / 2, codeY + codeH * 0.68);
+
+  } else if (opts.isDropCode && !opts.secretCode) {
+    // Dropcode faucet but admin hasn't retrieved the code yet — subtle hint
+    const dcY = netBY + netBH + 36 * scale;
+    ctx.textAlign = "center";
+    ctx.fillStyle = "rgba(255,255,255,0.6)";
+    ctx.font = `italic ${28 * scale}px sans-serif`;
+    ctx.fillText("Enter drop code to claim", W / 2, dcY + 40 * scale);
+  }
+
   return out;
 }
 
@@ -534,6 +577,8 @@ export function QRCodeShareDialog({
   faucetMetadata,
   selectedNetwork,
   tokenSymbol,
+  faucetType,
+  secretCode,
 }: QRCodeShareDialogProps) {
   const { resolvedTheme } = useTheme();
   const webCanvasRef       = useRef<HTMLCanvasElement>(null);
@@ -554,14 +599,21 @@ export function QRCodeShareDialog({
     farcaster: { dark: "#7c3aed", light: "#ffffff" },
   };
 
-  const webUrl       = typeof window !== "undefined" ? `${window.location.origin}/faucet/${faucetAddress}` : "";
+ const [webUrl, setWebUrl] = useState<string>("");
+
+useEffect(() => {
+  // Captures the exact current link safely on the client
+  if (typeof window !== "undefined") {
+    setWebUrl(window.location.href);
+  }
+}, []);
   const farcasterUrl = `https://farcaster.xyz/miniapps/x8wlGgdqylmp/FaucetDrops?startapp/faucet=${faucetAddress}`;
 
   // ── Fixed square QR generation ────────────────────────────────────────────
   const generateQR = (canvas: HTMLCanvasElement | null, url: string, color: { dark: string; light: string }) => {
     if (!canvas || !url) return;
     QRCode.toCanvas(canvas, url, {
-      width: 260,  // fixed square — prevents tall/wide distortion
+      width: 260,
       margin: 2,
       color: { dark: color.dark, light: color.light },
       errorCorrectionLevel: "H",
@@ -569,13 +621,16 @@ export function QRCodeShareDialog({
   };
 
   useEffect(() => {
-    if (!open) return;
-    const t = setTimeout(() => {
-      generateQR(webCanvasRef.current,       webUrl,       qrColors.web);
-      generateQR(farcasterCanvasRef.current, farcasterUrl, qrColors.farcaster);
-    }, 200);
-    return () => clearTimeout(t);
-  }, [open, resolvedTheme, activeTab]);
+  // Added !webUrl check so it waits until the link is captured
+  if (!open || !webUrl) return; 
+  
+  const t = setTimeout(() => {
+    generateQR(webCanvasRef.current, webUrl, qrColors.web);
+    generateQR(farcasterCanvasRef.current, farcasterUrl, qrColors.farcaster);
+  }, 200);
+  
+  return () => clearTimeout(t);
+}, [open, resolvedTheme, activeTab, webUrl]); // <-- Added webUrl to dependencies
 
   const getQRCanvas = (type: "web" | "farcaster") =>
     type === "web" ? webCanvasRef.current : farcasterCanvasRef.current;
@@ -586,7 +641,9 @@ export function QRCodeShareDialog({
     faucetImage,
     networkName:    selectedNetwork?.name    || "Mainnet",
     networkLogoUrl: selectedNetwork?.logoUrl || "",
-    logoPath: "/lightlogo.png",
+    logoPath:       "/lightlogo.png",
+    isDropCode:     faucetType === "dropcode",
+    secretCode:     secretCode || "",
   });
 
   // ── Preview ───────────────────────────────────────────────────────────────
@@ -605,7 +662,7 @@ export function QRCodeShareDialog({
     } finally {
       setPreviewLoading(false);
     }
-  }, [faucetName, tokenSymbol, faucetImage, selectedNetwork]);
+  }, [faucetName, tokenSymbol, faucetImage, selectedNetwork, faucetType, secretCode]);
 
   // ── Download full card ────────────────────────────────────────────────────
   const handleDownloadCard = useCallback(async (type: "web" | "farcaster") => {
@@ -627,7 +684,7 @@ export function QRCodeShareDialog({
     } finally {
       setDownloading(false);
     }
-  }, [faucetName, tokenSymbol, faucetImage, selectedNetwork]);
+  }, [faucetName, tokenSymbol, faucetImage, selectedNetwork, faucetType, secretCode]);
 
   // ── Download QR only ──────────────────────────────────────────────────────
   const handleDownloadQROnly = useCallback((type: "web" | "farcaster") => {
@@ -642,7 +699,7 @@ export function QRCodeShareDialog({
       const ctx = out.getContext("2d")!;
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, out.width, out.height);
-      ctx.drawImage(qrCanvas, pad, pad, size, size); // explicit square draw
+      ctx.drawImage(qrCanvas, pad, pad, size, size);
       const link = document.createElement("a");
       link.download = `${faucetName.replace(/\s+/g, "-")}-qr.png`;
       link.href = out.toDataURL("image/png", 1.0);
@@ -652,6 +709,10 @@ export function QRCodeShareDialog({
       setDlQrOnly(false);
     }
   }, [faucetName]);
+
+  // ── Drop code hint in the dialog UI ──────────────────────────────────────
+  const showCodeHint = faucetType === "dropcode" && !secretCode;
+  const showCodeBadge = faucetType === "dropcode" && !!secretCode;
 
   return (
     <>
@@ -668,6 +729,26 @@ export function QRCodeShareDialog({
             </DialogDescription>
           </DialogHeader>
 
+          {/* Drop code status banner */}
+          {faucetType === "dropcode" && (
+            <div className={`rounded-lg px-3 py-2 text-xs flex items-center gap-2 ${
+              showCodeBadge
+                ? "bg-blue-50 border border-blue-200 text-blue-700"
+                : "bg-amber-50 border border-amber-200 text-amber-700"
+            }`}>
+              {showCodeBadge ? (
+                <>
+                  <span className="font-semibold">Drop code included on card:</span>
+                  <span className="font-mono font-bold tracking-widest">{secretCode}</span>
+                </>
+              ) : (
+                <>
+                  <span>Retrieve the drop code first to include it on the card.</span>
+                </>
+              )}
+            </div>
+          )}
+
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "web" | "farcaster")}>
             <TabsList className="grid w-full grid-cols-2 bg-muted mt-2">
               <TabsTrigger value="web"       className="text-xs">Web Access</TabsTrigger>
@@ -679,7 +760,7 @@ export function QRCodeShareDialog({
                 key={tab} value={tab}
                 className="mt-3 flex flex-col items-center gap-2"
               >
-                {/* QR preview — fixed square container, no stretching */}
+                {/* QR preview */}
                 <div className="bg-white rounded-2xl shadow-xl border border-primary/10 flex items-center justify-center w-[260px] h-[260px] flex-shrink-0">
                   <canvas
                     ref={tab === "web" ? webCanvasRef : farcasterCanvasRef}
@@ -738,7 +819,7 @@ export function QRCodeShareDialog({
       </Dialog>
 
       {/* ── Card Preview modal ────────────────────────────────────────────── */}
-       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="
           w-[95vw] max-w-[520px] p-0 overflow-hidden
           bg-zinc-950 border-zinc-800

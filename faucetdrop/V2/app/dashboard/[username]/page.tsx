@@ -3,7 +3,8 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { useWallet } from "@/components/wallet-provider" 
-import { useNetwork } from "@/hooks/use-network" 
+import { useWallet as useSolanaWallet } from "@solana/wallet-adapter-react" // <-- Added Solana Hook
+import { useNetwork, Network } from "@/hooks/use-network" 
 import { getUserFaucets } from "@/lib/faucet"
 import { Header } from "@/components/header"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -12,16 +13,27 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { createClient } from "@supabase/supabase-js"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
+import { ChallengeDashboardTab } from "@/components/challenge-dashboard-tab"
 import { 
     Settings, Search, Copy, Wallet, Loader2,
-    ScrollText, PencilRuler, Rocket, Trash2
+    ScrollText, PencilRuler, Rocket, Trash2,
+    CheckCircle,
+    Shield
 } from "lucide-react"
+import { useSearchParams } from "next/navigation"
+
 import { useToast } from "@/hooks/use-toast"
-import { ProfileSettingsModal } from "@/components/profile-setting" 
+import { ProfileSettingsModal } from "@/components/profile-settings-modal" 
 import { MyCreationsModal } from "@/components/my-creations-modal" 
 import { CreateNewModal } from "@/components/create-new-modal" 
 import { usePrivy } from "@privy-io/react-auth" 
 import { EmbeddedWalletControlProduction } from "@/components/embeddedwallet"
+import { SelfVerificationModal } from "@/components/self-verification-modal"
+import { VerifiedAvatar, VerifyPill, VerifiedBadge } from "@/components/verified-profile-avatar"
+import Loading from "@/app/loading"
 
 // --- Custom Icons ---
 const XIcon = ({ className }: { className?: string }) => (
@@ -32,23 +44,50 @@ const XIcon = ({ className }: { className?: string }) => (
 
 // --- Types ---
 interface FaucetData {
-    faucetAddress: string;
-    name: string;
-    chainId: number;
-    faucetType: string;
-    createdAt?: string;
+  faucetAddress: string;
+  name:          string;
+  chainId:       number;
+  faucetType:    string;
+  createdAt?:    string;
+  slug?:         string;
+  imageUrl?:     string;
+  tokenSymbol?:  string;
+  tokenDecimals?: number;
+  isEther?:      boolean;
+  isClaimActive?: boolean;
+  claimAmount?:  bigint;
+  startTime?:    string | number;
+  endTime?:      string | number;
+  token?:        string;
+  network?:      Network;
+  description?:  string;
+  owner?:        string;
+  factoryAddress?: string;
 }
 
 interface QuestData {
     faucetAddress?: string; 
     slug?: string;
     title: string;
+    isDemo?: boolean;
     description: string;
     imageUrl: string;
     creatorAddress?: string;
     status?: 'draft' | 'published';
     createdAt?: string;
     participantCount?: number;
+}
+
+interface QuizData {
+    code: string;
+    title: string;
+    description: string;
+    coverImageUrl?: string;
+    status: string;
+    creatorAddress: string;
+    playerCount: number;
+    maxParticipants: number;
+    createdAt: string;
 }
 
 interface UserProfileData {
@@ -64,18 +103,88 @@ interface UserProfileData {
 }
 
 export default function DashboardPage() {
-    const backendUrl = "https://fauctdrop-backend.onrender.com"; 
+    const backendUrl = "https://identical-vivi-faucetdrops-41e9c56b.koyeb.app"; 
     const params = useParams();
     const router = useRouter();
     const { toast } = useToast();
-    const { address: connectedAddress, isConnected } = useWallet(); 
+    
+    // --- COMBINED WALLET LOGIC ---
+    const { address: evmAddress } = useWallet(); 
+    const { publicKey: solanaPublicKey } = useSolanaWallet();
+    // Resolve to whatever is actively connected
+    const currentConnectedAddress = solanaPublicKey?.toBase58() || evmAddress;
+    
     const { networks } = useNetwork();
     const { user: privyUser } = usePrivy(); 
     
-    // This could be "jerydam" OR "0x123..."
-    const targetUsernameOrAddress = params.username as string;
+    const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; quest: QuestData | null }>({ open: false, quest: null })
+    const [deleteConfirmInput, setDeleteConfirmInput] = useState("")
     
+    const targetUsernameOrAddress = params.username as string;
+    const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    )
+    
+    const [isVerifyModalOpen, setIsVerifyModalOpen] = useState(false);
+    const [isVerified, setIsVerified] = useState(false);
+
+    const getNativeTokenSymbol = (networkName: string): string => {
+      switch (networkName) {
+        case "Celo": return "CELO";
+        case "Lisk": return "ETH";
+        case "Arbitrum":
+        case "Base":
+        case "Ethereum": return "ETH";
+        case "BNB": return "BNB";
+        default: return "ETH";
+      }
+    };
+    const searchParams = useSearchParams();
+    useEffect(() => {
+    if (searchParams.get('tab') === 'challenge') {
+        setActiveTab('challenge');
+    }
+    }, [searchParams]);
+    async function fetchOwnerFaucetsMeta(supabaseClient: any, ownerAddress: string) {
+      const { data, error } = await supabaseClient
+        .from("network_faucets")
+        .select("faucet_address, slug, is_claim_active, is_ether, start_time, token_symbol, faucet_name, owner_address, factory_address, factory_type, chain_id")
+        .eq("owner_address", ownerAddress.toLowerCase());
+
+      if (error) throw new Error(`network_faucets owner fetch: ${error.message}`);
+      return (data ?? []).map((r: any) => ({
+        faucetAddress:  r.faucet_address,
+        isClaimActive:  r.is_claim_active,
+        isEther:        r.is_ether,
+        slug:           r.slug,
+        createdAt:      r.start_time,
+        tokenSymbol:    r.token_symbol,
+        name:           r.faucet_name,
+        owner:          r.owner_address,
+        factoryAddress: r.factory_address,
+        factoryType:    r.factory_type,
+        chainId:        r.chain_id,
+      }));
+    }
+
+    async function fetchOwnerFaucetsDetails(supabaseClient: any, addresses: string[]) {
+      if (addresses.length === 0) return {};
+      const { data, error } = await supabaseClient
+        .from("faucet_details")
+        .select("*")
+        .in("faucet_address", addresses.map((a: string) => a.toLowerCase()));
+
+      if (error) throw new Error(`faucet_details owner fetch: ${error.message}`);
+      const map: Record<string, any> = {};
+      for (const row of data ?? []) {
+        map[row.faucet_address.toLowerCase()] = row;
+      }
+      return map;
+    }
+
     // Data State
+    const [userQuizzes, setUserQuizzes] = useState<QuizData[]>([]);
     const [faucets, setFaucets] = useState<FaucetData[]>([]);
     const [publishedQuests, setPublishedQuests] = useState<QuestData[]>([]);
     const [draftQuests, setDraftQuests] = useState<QuestData[]>([]);
@@ -87,137 +196,147 @@ export default function DashboardPage() {
     // Filters & UI State
     const [searchQuery, setSearchQuery] = useState("");
     const [networkFilter, setNetworkFilter] = useState("all");
-    const [activeTab, setActiveTab] = useState("faucets");
+    const [activeTab, setActiveTab] = useState<'faucets' | 'quests' | 'quizzes' | 'challenge'>('faucets');
+
+
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
+    // --- UPDATED isOwner LOGIC ---
     const isOwner = useMemo(() => {
-        if (!connectedAddress || !profile?.wallet_address) return false;
-        return connectedAddress.toLowerCase() === profile.wallet_address.toLowerCase();
-    }, [connectedAddress, profile]);
+        if (!currentConnectedAddress || !profile?.wallet_address) return false;
+        return currentConnectedAddress.toLowerCase() === profile.wallet_address.toLowerCase();
+    }, [currentConnectedAddress, profile]);
+
     const getDisplayAvatar = () => {
-    if (profile?.avatar_url) return profile.avatar_url;
-    // Only use Privy fallback if the dashboard owner is the current logged-in user
-    if (isOwner && privyUser) {
-        const google = privyUser.google as any;
-        const twitter = privyUser.twitter as any;
-        return google?.picture || google?.profilePictureUrl || twitter?.profilePictureUrl || "";
+        if (profile?.avatar_url) return profile.avatar_url;
+        if (isOwner && privyUser) {
+            const google = privyUser.google as any;
+            const twitter = privyUser.twitter as any;
+            return google?.picture || google?.profilePictureUrl || twitter?.profilePictureUrl || "";
+        }
+        return "";
     }
-    return "";
-}
 
     const getDisplayName = () => {
-    // If they have a real DB username, use it. If it's the "New User" placeholder, try to upgrade it.
-    if (profile?.username && profile.username !== "New User") return profile.username;
-    
-    if (isOwner && privyUser) {
-        if (privyUser.twitter?.username) return privyUser.twitter.username;
-        if (privyUser.discord?.username) return privyUser.discord.username;
-        if (privyUser.google?.name) return privyUser.google.name.replace(/\s+/g, '');
-        if (privyUser.email?.address) return privyUser.email.address.split('@')[0];
+        if (profile?.username && profile.username !== "New User") return profile.username;
+        if (isOwner && privyUser) {
+            if (privyUser.twitter?.username) return privyUser.twitter.username;
+            if (privyUser.discord?.username) return privyUser.discord.username;
+            if (privyUser.google?.name) return privyUser.google.name.replace(/\s+/g, '');
+            if (privyUser.email?.address) return privyUser.email.address.split('@')[0];
+        }
+        return profile?.username || "Anonymous";
     }
-    return profile?.username || "Anonymous";
-}
+
+    useEffect(() => {
+        if (profile?.wallet_address) {
+            const stored = localStorage.getItem(`verification_${profile.wallet_address.toLowerCase()}`);
+            if (stored) {
+                const data = JSON.parse(stored);
+                if (data.verified && (Date.now() - data.timestamp < 30 * 24 * 60 * 60 * 1000)) {
+                    setIsVerified(true);
+                }
+            }
+        }
+    }, [profile]);
+
+    const handleVerificationSuccess = async (data: any) => {
+        try {
+            const response = await fetch(`${backendUrl}/api/users/${profile?.wallet_address.toLowerCase()}/verify`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    is_verified: true,
+                    verification_data: data 
+                }),
+            });
+
+            if (response.ok) {
+                setIsVerified(true);
+                localStorage.setItem(`verification_${profile?.wallet_address.toLowerCase()}`, JSON.stringify(data));
+                toast({ title: "Identity Verified!", description: "Your status is now permanently saved to your profile." });
+            }
+        } catch (error) {
+            console.error("Failed to save verification:", error);
+            toast({ title: "Error", description: "Verification succeeded but failed to save to profile.", variant: "destructive" });
+        }
+    };
 
     const displayAvatar = getDisplayAvatar();
     const displayName = getDisplayName();
-    // --- NEW: Sync Email with Backend ---
+
     const syncEmailToBackend = useCallback(async (walletAddress: string, email: string) => {
         try {
-            console.log('[Dashboard] Syncing email to backend:', email);
             const response = await fetch(`${backendUrl}/api/users/${walletAddress.toLowerCase()}`, {
                 method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email }),
             });
-
             const data = await response.json();
-            
-            if (data.success) {
-                console.log('✅ [Dashboard] Email synced successfully');
-                return true;
-            } else {
-                console.error('❌ [Dashboard] Failed to sync email:', data);
-                return false;
-            }
+            return data.success;
         } catch (error) {
             console.error('❌ [Dashboard] Error syncing email:', error);
             return false;
         }
     }, [backendUrl]);
 
-    // --- NEW: Check and sync email when user is logged in ---
     useEffect(() => {
-        if (!privyUser || !connectedAddress || !isOwner) return;
-
-        // Get email from Privy user object
+        if (!privyUser || !currentConnectedAddress || !isOwner) return;
         const userEmail = privyUser.email?.address;
         
         if (userEmail && profile && !profile.email) {
-            console.log('[Dashboard] User has email in Privy but not in profile, syncing...');
-            syncEmailToBackend(connectedAddress, userEmail).then((success) => {
+            syncEmailToBackend(currentConnectedAddress, userEmail).then((success) => {
                 if (success) {
-                    // Update local profile state
                     setProfile(prev => prev ? { ...prev, email: userEmail } : null);
-                    toast({ 
-                        title: "Email synced", 
-                        description: "Your email has been added to your profile" 
-                    });
+                    toast({ title: "Email synced", description: "Your email has been added to your profile" });
                 }
             });
         }
-    }, [privyUser, connectedAddress, profile, isOwner, syncEmailToBackend, toast]);
+    }, [privyUser, currentConnectedAddress, profile, isOwner, syncEmailToBackend, toast]);
 
-    // --- FUNCTION: Delete Draft ---
-    const handleDeleteDraft = async (draftId: string) => {
-        if (!confirm("Are you sure you want to delete this draft?")) return;
-        
+    const handleDeleteDraft = async () => {
+        if (!deleteDialog.quest?.faucetAddress) return
         try {
-            const res = await fetch(`${backendUrl}/api/quests/draft/${draftId}`, {
-                method: 'DELETE'
-            });
-            const data = await res.json();
-            
+            const res = await fetch(`${backendUrl}/api/quests/draft/${deleteDialog.quest.faucetAddress}`, { method: 'DELETE' })
+            const data = await res.json()
             if (data.success) {
-                toast({ title: "Draft deleted successfully" });
-                setDraftQuests(prev => prev.filter(q => q.faucetAddress !== draftId));
+                toast({ title: "Draft deleted successfully" })
+                setDraftQuests(prev => prev.filter(q => q.faucetAddress !== deleteDialog.quest!.faucetAddress))
             } else {
-                toast({ title: "Failed to delete draft", variant: "destructive" });
+                toast({ title: "Failed to delete draft", variant: "destructive" })
             }
         } catch (e) {
-            console.error(e);
-            toast({ title: "Error deleting draft", variant: "destructive" });
+            console.error(e)
+            toast({ title: "Error deleting draft", variant: "destructive" })
+        } finally {
+            setDeleteDialog({ open: false, quest: null })
+            setDeleteConfirmInput("")
         }
     }
 
-    // IMPROVED: Fetch data with better address/username handling
     const fetchData = useCallback(async () => {
-        console.log('[Dashboard] Starting fetchData for:', targetUsernameOrAddress)
         setLoading(true);
-        
         try {
             let userProfile: UserProfileData | null = null;
             let userWallet: string | null = null;
 
-            // STEP 1: Determine if input is address or username
-            const isAddress = targetUsernameOrAddress.startsWith('0x') && targetUsernameOrAddress.length === 42;
+            // Simple basic detection if it's base58 (Solana) or Hex (EVM)
+            // Anything > 42 chars that doesn't start with 0x is likely Base58 Solana
+            const isHexAddress = targetUsernameOrAddress.startsWith('0x') && targetUsernameOrAddress.length === 42;
+            const isBase58Address = !targetUsernameOrAddress.startsWith('0x') && targetUsernameOrAddress.length >= 32 && targetUsernameOrAddress.length <= 44;
+            const isAddress = isHexAddress || isBase58Address;
             
             if (isAddress) {
-                // Input is an address - fetch by address
-                console.log('[Dashboard] Fetching profile by address:', targetUsernameOrAddress)
                 const profRes = await fetch(`${backendUrl}/api/users/${targetUsernameOrAddress.toLowerCase()}?t=${Date.now()}`);
                 const profData = await profRes.json();
                 
-                // FIX: Check for nested 'profile' object OR top-level 'username'
                 const fetchedData = profData.profile || (profData.username ? profData : null);
 
                 if (profData.success && fetchedData) {
-                    // Profile exists in DB
                     userProfile = {
                         wallet_address: fetchedData.wallet_address || targetUsernameOrAddress.toLowerCase(),
                         username: fetchedData.username,
-                        email: fetchedData.email, // Include email
+                        email: fetchedData.email,
                         bio: fetchedData.bio,
                         avatar_url: fetchedData.avatar_url || fetchedData.avatarUrl,
                         twitter_handle: fetchedData.twitter_handle || fetchedData.twitterHandle,
@@ -225,31 +344,23 @@ export default function DashboardPage() {
                         telegram_handle: fetchedData.telegram_handle || fetchedData.telegramHandle,
                         farcaster_handle: fetchedData.farcaster_handle || fetchedData.farcasterHandle
                     };
-                    console.log('✅ [Dashboard] Profile found by address:', userProfile.username)
                 } else {
-                    // No profile yet, but valid address -> Show "New User"
                     userProfile = {
                         wallet_address: targetUsernameOrAddress.toLowerCase(),
                         username: "New User",
                         bio: "You haven't set up your profile yet. Click settings to get started!"
                     };
-                    console.log('✅ [Dashboard] New user detected (address)')
                 }
                 userWallet = targetUsernameOrAddress.toLowerCase();
                 
             } else {
-                // Input is a username - fetch by username
-                console.log('[Dashboard] Fetching profile by username:', targetUsernameOrAddress)
                 const profRes = await fetch(`${backendUrl}/api/profile/user/${targetUsernameOrAddress}?t=${Date.now()}`);
                 const profData = await profRes.json();
                 
                 if (profData.success && profData.profile) {
                     userProfile = profData.profile;
                     userWallet = profData.profile.wallet_address;
-                    console.log('✅ [Dashboard] Profile found by username:', userProfile.username)
                 } else {
-                    // Username not found
-                    console.log('❌ [Dashboard] Username not found')
                     setProfile(null);
                     setInitialLoadComplete(true);
                     setLoading(false);
@@ -257,18 +368,60 @@ export default function DashboardPage() {
                 }
             }
 
-            // STEP 2: Set profile
             setProfile(userProfile);
 
-            // STEP 3: Fetch user's faucets
             if (userWallet) {
-                console.log('[Dashboard] Fetching faucets for wallet:', userWallet.slice(0, 8))
-                const faucetData = await getUserFaucets(userWallet);
-                console.log('[Dashboard] Faucets loaded:', faucetData.length)
-                setFaucets(faucetData);
+                const metaList = await fetchOwnerFaucetsMeta(supabase, userWallet);
+                const detailMap = await fetchOwnerFaucetsDetails(supabase, metaList.map((m: any) => m.faucetAddress));
 
-                // STEP 4: Fetch published quests
-                console.log('[Dashboard] Fetching quests...')
+                const enrichedFaucets: FaucetData[] = metaList.map((meta: any) => {
+                const row = detailMap[meta.faucetAddress.toLowerCase()];
+                const chainNetwork = networks.find((n) => n.chainId === (meta as any).chainId);
+
+                if (row) {
+                    return {
+                        faucetAddress: row.faucet_address,
+                        name:          row.faucet_name,
+                        slug:          row.slug || meta.slug,
+                        tokenSymbol:   row.token_symbol || (row.is_ether ? getNativeTokenSymbol(chainNetwork?.name || "Ethereum") : "TOK"),
+                        tokenDecimals: row.token_decimals ?? 18,
+                        isEther:       row.is_ether,
+                        claimAmount:   row.claim_amount ? BigInt(row.claim_amount) : undefined,
+                        startTime:     row.start_time,
+                        endTime:       row.end_time,
+                        isClaimActive: row.is_claim_active,
+                        token:         row.token_address,
+                        network:       chainNetwork,
+                        createdAt:     row.start_time,
+                        description:   row.description,
+                        imageUrl:      row.image_url || "/default.jpeg",
+                        owner:         row.owner_address,
+                        factoryAddress: row.factory_address || meta.factoryAddress,
+                        faucetType:    meta.factoryType || "dropcode",
+                        chainId:       (meta as any).chainId,
+                    } as FaucetData & { chainId: number };
+                }
+
+                return {
+                    faucetAddress: meta.faucetAddress,
+                    name:          meta.name,
+                    slug:          meta.slug,
+                    tokenSymbol:   meta.tokenSymbol || (meta.isEther ? getNativeTokenSymbol(chainNetwork?.name || "Ethereum") : "TOK"),
+                    tokenDecimals: 18,
+                    isEther:       meta.isEther,
+                    isClaimActive: meta.isClaimActive,
+                    network:       chainNetwork,
+                    createdAt:     meta.createdAt,
+                    owner:         meta.owner,
+                    factoryAddress: meta.factoryAddress,
+                    imageUrl:      "/default.jpeg",
+                    faucetType:    meta.factoryType || "dropcode",
+                    chainId:       (meta as any).chainId,
+                } as FaucetData & { chainId: number };
+                });
+
+                setFaucets(enrichedFaucets);
+
                 const questRes = await fetch(`${backendUrl}/api/quests?t=${Date.now()}`);
                 const qData = await questRes.json();
                 
@@ -281,15 +434,15 @@ export default function DashboardPage() {
                             faucetAddress: q.faucetAddress
                         }));
                     
-                    const published = myQuests.filter((q: any) => !q.isDraft);
-                    console.log('[Dashboard] Published quests loaded:', published.length)
+                    const published = myQuests.filter((q: any) => !q.isDraft).map((q: any) => ({
+                            ...q,
+                            isDemo: q.faucetAddress?.startsWith("draft-") || q.faucetAddress?.startsWith("demo-")
+                        }));
                     setPublishedQuests(published);
                 }
 
-                // STEP 5: Fetch drafts (only if owner)
-                const isOwnerView = connectedAddress && userWallet.toLowerCase() === connectedAddress.toLowerCase();
+                const isOwnerView = currentConnectedAddress && userWallet.toLowerCase() === currentConnectedAddress.toLowerCase();
                 if (isOwnerView) {
-                    console.log('[Dashboard] Fetching drafts...')
                     try {
                         const draftRes = await fetch(`${backendUrl}/api/quests/drafts/${userWallet}?t=${Date.now()}`);
                         if (draftRes.ok) {
@@ -301,15 +454,30 @@ export default function DashboardPage() {
                                     creatorAddress: d.creator_address,
                                     imageUrl: d.image_url,
                                     title: d.title,
-                                    description: d.description
+                                    description: d.description,
+                                    isDemo: !d.is_subscribed
                                 }));
-                                console.log('[Dashboard] Drafts loaded:', formattedDrafts.length)
                                 setDraftQuests(formattedDrafts);
                             }
                         }
                     } catch (err) {
                         console.log('[Dashboard] No drafts found:', err);
                     }
+                }
+
+                try {
+                    const quizRes = await fetch(`${backendUrl}/api/quiz/list?t=${Date.now()}`);
+                    const quizData = await quizRes.json();
+                    
+                    if (quizData.success && quizData.quizzes) {
+                        const myQuizzes = quizData.quizzes.filter(
+                            (q: QuizData) => q.creatorAddress?.toLowerCase() === userWallet!.toLowerCase()
+                        );
+                        setUserQuizzes(myQuizzes);
+                        setQuizCount(myQuizzes.length);
+                    }
+                } catch (err) {
+                    console.log('[Dashboard] Error fetching quizzes:', err);
                 }
             }
             
@@ -322,16 +490,11 @@ export default function DashboardPage() {
         } finally {
             setLoading(false);
         }
-    }, [targetUsernameOrAddress, connectedAddress, backendUrl, toast]);
+    }, [targetUsernameOrAddress, currentConnectedAddress, backendUrl, toast]);
 
-    // STEP 6: Trigger data fetch on mount and when params change
     useEffect(() => {
-        if (!targetUsernameOrAddress) {
-            console.log('[Dashboard] No username/address provided')
-            return;
-        }
+        if (!targetUsernameOrAddress) return;
         
-        // Reset state when username changes
         setInitialLoadComplete(false);
         setProfile(null);
         setFaucets([]);
@@ -341,7 +504,6 @@ export default function DashboardPage() {
         fetchData();
     }, [targetUsernameOrAddress, fetchData]);
 
-    // Helpers
     const getNetworkName = (id: number) => networks.find(n => n.chainId === id)?.name || `Chain ${id}`;
     const getNetworkColor = (id: number) => networks.find(n => n.chainId === id)?.color || "#64748b";
     
@@ -369,12 +531,10 @@ export default function DashboardPage() {
         });
     }, [faucets, searchQuery, networkFilter]);
 
-    // Loading state
     if (loading && !initialLoadComplete) {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center">
-                <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
-                <p className="text-muted-foreground">Loading dashboard...</p>
+               <Loading/>
             </div>
         );
     }
@@ -402,39 +562,37 @@ export default function DashboardPage() {
                     hideAction={true} 
                 />
 
-                {/* --- 1. USER IDENTITY SECTION --- */}
                 <div className="mb-10">
                     <Card className="border-none bg-gradient-to-r from-primary/5 via-primary/10 to-background shadow-sm">
                         <CardContent className="p-6 sm:p-8 flex flex-col md:flex-row items-start md:items-center gap-6 relative">
-                            {/* Embedded Wallet - Top Right Corner on Mobile */}
                             {isOwner && (
                                 <div className="absolute top-4 right-4 md:hidden z-30">
                                     <EmbeddedWalletControlProduction />
                                 </div>
                             )}
+
+                            <VerifiedAvatar
+                                displayAvatar={displayAvatar}
+                                displayName={displayName}
+                                isVerified={isVerified}
+                                isOwner={isOwner}
+                            />
+
+                            <SelfVerificationModal
+                                isOpen={isVerifyModalOpen}
+                                onOpenChange={setIsVerifyModalOpen}
+                                account={currentConnectedAddress || ""}
+                                onSuccess={handleVerificationSuccess}
+                            />
                             
-                            <div className="relative">
-                                <Avatar className="h-24 w-24 border-4 border-background shadow-lg relative z-10">
-                                    <AvatarImage src={displayAvatar} className="object-cover" />
-                                    <AvatarFallback className="bg-primary text-white text-2xl">
-                                        {displayName.charAt(0).toUpperCase()}
-                                    </AvatarFallback>
-                                </Avatar>
-
-                                {isOwner && (
-                                    <div className="absolute -bottom-2 -right-2 z-20 bg-background rounded-full shadow-md">
-                                        <ProfileSettingsModal />
-                                    </div>
-                                )}
-                            </div>
-
                             <div className="flex-1 space-y-2">
                                 <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
                                     <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
                                         {displayName}
                                     </h1>
+                                    {isOwner && !isVerified && <VerifyPill onClick={() => setIsVerifyModalOpen(true)} />}
+                                    {isVerified && <VerifiedBadge />}
                                     <div className="flex gap-2 flex-wrap justify-center sm:justify-start">
-                                        {/* Twitter / X */}
                                         {profile?.twitter_handle && (
                                             <a href={getSocialUrl('twitter', profile.twitter_handle)} target="_blank" rel="noopener noreferrer" className="no-underline">
                                                 <Badge variant="secondary" className="bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-100 gap-1.5 pl-2 pr-2.5 cursor-pointer">
@@ -443,14 +601,12 @@ export default function DashboardPage() {
                                             </a>
                                         )}
 
-                                        {/* Discord */}
                                         {profile?.discord_handle && (
                                             <Badge variant="secondary" className="bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-100 gap-1.5 pl-2 pr-2.5">
                                                 Discord: {profile.discord_handle}
                                             </Badge>
                                         )}
 
-                                        {/* Telegram */}
                                         {profile?.telegram_handle && (
                                             <a href={getSocialUrl('telegram', profile.telegram_handle)} target="_blank" rel="noopener noreferrer" className="no-underline">
                                                 <Badge variant="secondary" className="bg-sky-50 text-sky-700 hover:bg-sky-100 border-sky-100 gap-1.5 pl-2 pr-2.5 cursor-pointer">
@@ -459,7 +615,6 @@ export default function DashboardPage() {
                                             </a>
                                         )}
 
-                                        {/* Farcaster */}
                                         {profile?.farcaster_handle && (
                                             <a href={getSocialUrl('farcaster', profile.farcaster_handle)} target="_blank" rel="noopener noreferrer" className="no-underline">
                                                 <Badge variant="secondary" className="bg-purple-50 text-purple-700 hover:bg-purple-100 border-purple-100 gap-1.5 pl-2 pr-2.5 cursor-pointer">
@@ -483,7 +638,6 @@ export default function DashboardPage() {
                                 </p>
                             </div>
 
-                            {/* STATS SECTION */}
                             <div className="flex items-center gap-6 bg-background/50 p-4 rounded-xl border self-start md:self-center w-full md:w-auto justify-around md:justify-start">
                                 <div className="text-center">
                                     <div className="text-2xl font-bold">{faucets.length}</div>
@@ -504,7 +658,6 @@ export default function DashboardPage() {
                     </Card>
                 </div>
 
-                {/* --- 2. ACTION BAR & TABS --- */}
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-4">
                     <div className="flex items-center gap-2 bg-muted/50 p-1 rounded-lg">
                         <button 
@@ -519,28 +672,40 @@ export default function DashboardPage() {
                         >
                             Quests ({publishedQuests.length})
                         </button>
+                        <button 
+                            onClick={() => setActiveTab('quizzes')}
+                            className={`px-4 py-2 text-sm font-medium whitespace-nowrap rounded-md transition-all ${activeTab === 'quizzes' ? 'bg-background shadow text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                        >
+                            Quizzes ({quizCount})
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('challenge')}
+                            className={`px-4 py-2 text-sm font-medium whitespace-nowrap rounded-md transition-all ${
+                                activeTab === 'challenge'
+                                ? 'bg-background shadow text-foreground'
+                                : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                            >
+                            ⚡ Challenge
+                            </button>
                     </div>
-
+                    
                     {isOwner && (
                         <div className="flex gap-3 w-full md:w-auto">
-                            {/* Mobile - Only show action buttons (wallet is in profile section) */}
                             <div className="md:hidden flex gap-3 w-full">
-                                <MyCreationsModal faucets={faucets} address={connectedAddress!} />
+                                <MyCreationsModal faucets={faucets} address={currentConnectedAddress!} />
                                 <CreateNewModal onSuccess={fetchData} />
                             </div>
                             
-                            {/* Desktop - Show all buttons including wallet */}
                             <div className="hidden md:flex gap-3 flex-wrap">
                                 <EmbeddedWalletControlProduction /> 
-                                <MyCreationsModal faucets={faucets} address={connectedAddress!} />
+                                <MyCreationsModal faucets={faucets} address={currentConnectedAddress!} />
                                 <CreateNewModal onSuccess={fetchData} />
                             </div>
                         </div>
                     )}
                 </div>
 
-                {/* --- 3. MAIN CONTENT --- */}
-                
                 {/* TAB: FAUCETS */}
                 {activeTab === 'faucets' && (
                     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -567,7 +732,11 @@ export default function DashboardPage() {
                                     faucet={faucet} 
                                     getNetworkName={getNetworkName}
                                     getNetworkColor={getNetworkColor}
-                                    onManage={() => router.push(`/faucet/${faucet.faucetAddress}?networkId=${faucet.chainId}`)}
+                                    onManage={() => router.push(
+                                        faucet.slug
+                                            ? `/faucet/${faucet.slug}`
+                                            : `/faucet/${faucet.faucetAddress}?networkId=${faucet.chainId}`
+                                        )}
                                     isOwner={isOwner}
                                 />
                             )) : (
@@ -599,8 +768,7 @@ export default function DashboardPage() {
                                 <div className="text-center py-8">No published quests yet.</div>
                             )}
                         </div>
-                        
-                        {/* Section: Drafts (Only for Owner) */}
+                
                         {isOwner && (
                             <div>
                                 <div className="flex items-center gap-3 mb-4">
@@ -617,8 +785,11 @@ export default function DashboardPage() {
                                                 key={quest.faucetAddress} 
                                                 quest={quest} 
                                                 type="draft"
-                                                onClick={() => router.push(`/quest/create-quest?draftId=${quest.faucetAddress}`)}
-                                                onDelete={handleDeleteDraft}
+                                                onClick={() => router.push(`/quest/create-quest?draftId=${quest.faucetAddress}${quest.isDemo ? '&demo=true' : ''}`)}
+                                                onDelete={(quest) => {
+                                                    setDeleteDialog({ open: true, quest })
+                                                    setDeleteConfirmInput("")
+                                                }}
                                             />
                                         ))}
                                     </div>
@@ -631,7 +802,75 @@ export default function DashboardPage() {
                         )}
                     </div>
                 )}
+                
+                {/* TAB: QUIZZES */}
+                {activeTab === 'quizzes' && (
+                    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                        <div>
+                            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                                🧠 Created Quizzes
+                            </h3>
+                            {userQuizzes.length > 0 ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {userQuizzes.map((quiz) => (
+                                        <QuizCard 
+                                            key={quiz.code} 
+                                            quiz={quiz} 
+                                            onClick={() => router.push(`/quiz/${quiz.code}`)} 
+                                        />
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-8 border border-dashed rounded-lg bg-muted/10 text-muted-foreground">
+                                    No quizzes created yet.
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+                {/* TAB: CHALLENGE */}
+                {activeTab === 'challenge' && (
+                <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <ChallengeDashboardTab walletAddress={profile.wallet_address} />
+                </div>
+                )}
             </div>
+
+            <Dialog open={deleteDialog.open} onOpenChange={(open) => { setDeleteDialog({ open, quest: open ? deleteDialog.quest : null }); setDeleteConfirmInput("") }}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Delete Draft</DialogTitle>
+                        <DialogDescription>
+                            This action cannot be undone. Type the quest name below to confirm deletion.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3 py-2">
+                        <p className="text-sm font-medium text-foreground">
+                            Quest name: <span className="font-bold text-destructive">{deleteDialog.quest?.title || "Untitled Quest"}</span>
+                        </p>
+                        <div className="space-y-1.5">
+                            <Label className="text-xs text-muted-foreground">Type the quest name to confirm</Label>
+                            <Input
+                                placeholder={deleteDialog.quest?.title || "Untitled Quest"}
+                                value={deleteConfirmInput}
+                                onChange={e => setDeleteConfirmInput(e.target.value)}
+                            />
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => { setDeleteDialog({ open: false, quest: null }); setDeleteConfirmInput("") }}>
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            disabled={deleteConfirmInput !== (deleteDialog.quest?.title || "Untitled Quest")}
+                            onClick={() => handleDeleteDraft()}
+                        >
+                            <Trash2 className="h-4 w-4 mr-2" /> Delete Draft
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </main>
     )
 }
@@ -641,17 +880,25 @@ export default function DashboardPage() {
 function FaucetCard({ faucet, getNetworkName, getNetworkColor, onManage, isOwner }: any) {
     const networkName = getNetworkName(faucet.chainId)
     const networkColor = getNetworkColor(faucet.chainId)
-
     return (
-        <Card className="hover:shadow-lg transition-all duration-200 flex flex-col group border-l-4" style={{ borderLeftColor: networkColor }}>
+        <Card className="hover:shadow-md transition-all group cursor-pointer flex flex-col">
+            <div className="relative aspect-square w-full bg-muted overflow-hidden rounded-t-lg">
+                {faucet.imageUrl ? (
+                    <img src={faucet.imageUrl} alt={faucet.name} className="w-full h-full object-cover" />
+                ) : (
+                    <div className="w-full h-full flex items-center justify-center bg-primary/5">
+                        <span className="text-primary/30 text-4xl font-bold uppercase">{faucet.name?.charAt(0) || "F"}</span>
+                    </div>
+                )}
+                <Badge className="absolute top-2 right-2 capitalize text-xs" variant="secondary">
+                    {faucet.faucetType}
+                </Badge>
+            </div>
             <CardHeader className="pb-3">
                 <div className="flex justify-between items-start">
                     <Badge variant="outline" className="mb-2 bg-background" style={{ borderColor: networkColor, color: networkColor }}>
                         <span className="w-1.5 h-1.5 rounded-full mr-1.5" style={{ backgroundColor: networkColor }}></span>
                         {networkName}
-                    </Badge>
-                    <Badge variant="secondary" className="capitalize text-xs">
-                        {faucet.faucetType}
                     </Badge>
                 </div>
                 <CardTitle className="truncate text-lg">{faucet.name}</CardTitle>
@@ -668,30 +915,76 @@ function FaucetCard({ faucet, getNetworkName, getNetworkColor, onManage, isOwner
     )
 }
 
+function QuizCard({ quiz, onClick }: { quiz: QuizData; onClick: () => void }) {
+    return (
+        <Card className="hover:shadow-md transition-all group cursor-pointer flex flex-col" onClick={onClick}>
+            <div className="relative aspect-square w-full bg-muted overflow-hidden rounded-t-lg">
+                {quiz.coverImageUrl ? (
+                    <img src={quiz.coverImageUrl} alt={quiz.title} className="w-full h-full object-cover" />
+                ) : (
+                    <div className="w-full h-full bg-primary/10 flex items-center justify-center">
+                        <span className="text-primary/40 text-4xl font-bold uppercase">{quiz.title?.charAt(0) || "Q"}</span>
+                    </div>
+                )}
+                <Badge 
+                    className="absolute top-2 right-2 capitalize" 
+                    variant={quiz.status === 'active' ? 'default' : quiz.status === 'finished' ? 'secondary' : 'outline'}
+                >
+                    {quiz.status}
+                </Badge>
+            </div>
+            <CardContent className="p-4 flex flex-col flex-grow">
+                <div className="flex justify-between items-start mb-1 gap-2">
+                    <h4 className="font-bold truncate text-base">{quiz.title || "Untitled Quiz"}</h4>
+                    <span className="text-xs font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">
+                        {quiz.code}
+                    </span>
+                </div>
+                <p className="text-sm text-muted-foreground line-clamp-2 h-10 mb-4">
+                    {quiz.description || "No description provided."}
+                </p>
+                <div className="mt-auto flex justify-between items-center text-xs text-muted-foreground border-t pt-3">
+                    <div className="flex items-center gap-1 font-medium">
+                        <span className="text-primary">Players: {quiz.playerCount}</span>
+                        {quiz.maxParticipants > 0 && <span>/ {quiz.maxParticipants}</span>}
+                    </div>
+                    <span>
+                        {quiz.createdAt ? new Date(quiz.createdAt).toLocaleDateString() : ""}
+                    </span>
+                </div>
+            </CardContent>
+        </Card>
+    )
+}
+
 interface QuestCardProps {
     quest: QuestData;
     type: 'published' | 'draft';
     onClick: () => void;
-    onDelete?: (id: string) => void;
+    onDelete?: (quest: QuestData) => void;
 }
 
 function QuestCard({ quest, type, onClick, onDelete }: QuestCardProps) {
     return (
         <Card className={`hover:shadow-md transition-all group ${type === 'draft' ? 'border-dashed border-orange-200 bg-orange-50/10' : ''}`}>
-            <div className="relative h-32 w-full bg-muted overflow-hidden rounded-t-lg cursor-pointer" onClick={onClick}>
-                {quest.imageUrl && (
-                    <img src={quest.imageUrl} alt={quest.title} className="w-full h-full object-cover" />
-                )}
-                <Badge className="absolute top-2 right-2" variant={type === 'draft' ? "outline" : "default"}>
-                    {type === 'draft' ? 'Draft' : 'Published'}
-                </Badge>
+           <div className="relative aspect-square w-full bg-muted overflow-hidden rounded-t-lg cursor-pointer" onClick={onClick}>
+            {quest.imageUrl && (
+                <img src={quest.imageUrl} alt={quest.title} className="w-full h-full object-cover" />
+            )}
+               <div className="absolute top-2 right-2 flex gap-1">
+                    <Badge variant={type === 'draft' ? "outline" : "default"}>
+                        {type === 'draft' ? 'Draft' : 'Published'}
+                    </Badge>
+                    {(quest.isDemo || quest.faucetAddress?.startsWith("draft-") || quest.faucetAddress?.startsWith("demo-")) && (
+                        <Badge className="bg-amber-500 text-white border-0">Demo</Badge>
+                    )}
+                </div>
             </div>
             <CardContent className="p-4">
                 <h4 className="font-bold truncate text-base mb-1">{quest.title || "Untitled Quest"}</h4>
                 <p className="text-sm text-muted-foreground line-clamp-2 h-10 mb-3">
                     {quest.description || "No description provided."}
                 </p>
-                
                 <div className="flex gap-2">
                     <Button 
                         variant={type === 'draft' ? "outline" : "default"} 
@@ -705,7 +998,6 @@ function QuestCard({ quest, type, onClick, onDelete }: QuestCardProps) {
                             <><ScrollText className="h-3 w-3 mr-2" /> View Quest</>
                         )}
                     </Button>
-                    
                     {type === 'draft' && onDelete && (
                         <Button 
                             variant="ghost" 
@@ -713,7 +1005,7 @@ function QuestCard({ quest, type, onClick, onDelete }: QuestCardProps) {
                             className="px-2" 
                             onClick={(e) => {
                                 e.stopPropagation();
-                                onDelete(quest.faucetAddress!);
+                                onDelete(quest);
                             }}
                         >
                             <Trash2 className="h-3 w-3 text-red-500" />

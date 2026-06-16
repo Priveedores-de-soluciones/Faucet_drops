@@ -3,7 +3,6 @@
 
 import { useNetwork, type Network } from "@/hooks/use-network"
 import { useWallet } from "@/components/wallet-provider" // USE THIS instead of wagmi
-import { usePrivy } from '@privy-io/react-auth'
 import { useRouter, usePathname } from "next/navigation"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -103,14 +102,15 @@ export function NetworkSelector({
 }: NetworkSelectorProps) {
   const { networks, isConnecting } = useNetwork() 
   const { chainId, isConnected, address, switchChain, connect } = useWallet() // CHANGED
-  const { authenticated } = usePrivy()
+ 
   const [isSwitching, setIsSwitching] = useState(false)
   
   const router = useRouter()
   const pathname = usePathname()
   
-  const isWalletAvailable = typeof window !== "undefined" && window.ethereum
-  const hasWalletConnected = authenticated && isConnected && !!address
+  const isWalletAvailable = typeof window !== "undefined"
+  const hasWalletConnected = isConnected && !!address
+
   
   const currentNetwork = networks.find((net) => net.chainId === chainId)
   
@@ -367,13 +367,14 @@ export function NetworkStatusSelector({ className }: { className?: string }) {
 export function MobileNetworkSelector({ className }: { className?: string }) {
   const { networks, network } = useNetwork()
   const { isConnected, address, switchChain, connect } = useWallet() // CHANGED
-  const { authenticated } = usePrivy()
+  
   const [isSwitching, setIsSwitching] = useState(false)
   
   const router = useRouter()
   const pathname = usePathname()
 
-  const hasWalletConnected = authenticated && isConnected && !!address
+  const hasWalletConnected = isConnected && !!address
+
   
   const handleNetworkSelect = async (net: Network) => {
     console.log('Mobile network select:', net.name)
@@ -543,14 +544,13 @@ export function NetworkGrid({ onNetworkSelect }: { onNetworkSelect?: (network: N
 
 export function HorizontalNetworkSelector({ className }: { className?: string }) {
   const { networks, network } = useNetwork()
-  const { isConnected, address, switchChain, connect } = useWallet() // CHANGED
-  const { authenticated } = usePrivy()
+  const { isConnected, address, switchChain, connect, chainId } = useWallet() // CHANGED
   const [isSwitching, setIsSwitching] = useState(false)
   
   const router = useRouter()
   const pathname = usePathname()
 
-  const hasWalletConnected = authenticated && isConnected && !!address
+  const hasWalletConnected = isConnected && !!address
   
   const handleNetworkSelect = async (net: Network) => {
     if (!hasWalletConnected) {
@@ -558,7 +558,7 @@ export function HorizontalNetworkSelector({ className }: { className?: string })
       return
     }
     
-    if (network?.chainId === net.chainId) return
+    if (chainId != null && chainId === net.chainId) return
     
     setIsSwitching(true)
     try {
@@ -603,7 +603,7 @@ export function HorizontalNetworkSelector({ className }: { className?: string })
 
 export function MiniNetworkIndicator({ className = "" }: { className?: string }) {
   const { networks } = useNetwork()
-  const { chainId, isConnected, switchChain } = useWallet()
+  const { chainId, isConnected, address, switchChain, connect } = useWallet()
   const [isSwitching, setIsSwitching] = useState(false)
   
   const currentNetwork = networks.find((net) => net.chainId === chainId)

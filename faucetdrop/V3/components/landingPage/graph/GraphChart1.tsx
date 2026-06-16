@@ -51,3 +51,97 @@ const SpecifiedDomainRadarChart = () => {
 };
 
 export default SpecifiedDomainRadarChart;
+
+
+
+
+//Real Data Version
+// 'use client'
+// import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Legend, ResponsiveContainer, Tooltip } from 'recharts';
+// import { Loader2 } from 'lucide-react';
+// import { useDashboard } from '@/hooks/use-dashboard';
+
+// const SimpleRadarChart = () => {
+//   const { data, loading, error } = useDashboard();
+
+//   if (loading) return (
+//     <div className="flex items-center justify-center h-full">
+//       <Loader2 className="h-8 w-8 animate-spin text-blue-400" />
+//     </div>
+//   );
+
+//   if (error || !data) return (
+//     <div className="flex items-center justify-center h-full text-red-400 text-sm">
+//       Failed to load data
+//     </div>
+//   );
+
+//   // Merge network_faucets + network_transactions into one dataset per network
+//   const radarData = data.network_faucets.map((nf) => {
+//     const txRow = data.network_transactions.find(
+//       (nt) => nt.name.toLowerCase() === nf.network.toLowerCase()
+//     );
+//     return {
+//       name:         nf.network,
+//       faucets:      nf.faucets,
+//       transactions: txRow?.totalTransactions ?? 0,
+//     };
+//   });
+
+//   // Normalize to 0–100 for radar readability
+//   const maxFaucets = Math.max(...radarData.map((d) => d.faucets), 1);
+//   const maxTx      = Math.max(...radarData.map((d) => d.transactions), 1);
+
+//   const normalized = radarData.map((d) => ({
+//     name:         d.name,
+//     faucets:      Math.round((d.faucets / maxFaucets) * 100),
+//     transactions: Math.round((d.transactions / maxTx) * 100),
+//   }));
+
+//   return (
+//     <ResponsiveContainer width="100%" height="100%">
+//       <RadarChart outerRadius="75%" data={normalized}>
+//         <PolarGrid stroke="rgba(255,255,255,0.1)" />
+//         <PolarAngleAxis
+//           dataKey="name"
+//           tick={{ fill: 'rgba(255,255,255,0.7)', fontSize: 12 }}
+//         />
+//         <PolarRadiusAxis
+//           angle={30}
+//           domain={[0, 100]}
+//           tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }}
+//           tickCount={4}
+//         />
+//         <Radar
+//           name="Faucets"
+//           dataKey="faucets"
+//           stroke="#0052FF"
+//           fill="#0052FF"
+//           fillOpacity={0.4}
+//         />
+//         <Radar
+//           name="Transactions"
+//           dataKey="transactions"
+//           stroke="#00d4ff"
+//           fill="#00d4ff"
+//           fillOpacity={0.4}
+//         />
+//         <Tooltip
+//           contentStyle={{
+//             background: '#0d1f40',
+//             border: '1px solid rgba(0,212,255,0.3)',
+//             borderRadius: '8px',
+//             color: '#fff',
+//             fontSize: '12px',
+//           }}
+//           formatter={(value: number, name: string) => [`${value}%`, name]}
+//         />
+//         <Legend
+//           wrapperStyle={{ color: 'rgba(255,255,255,0.7)', fontSize: '12px' }}
+//         />
+//       </RadarChart>
+//     </ResponsiveContainer>
+//   );
+// };
+
+// export default SimpleRadarChart;

@@ -9,7 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Library, Droplets, ScrollText, BrainCircuit, ExternalLink, Loader2 } from "lucide-react"
 
 // Backend URL
-const API_BASE_URL = "https://fauctdrop-backend.onrender.com"
+const API_BASE_URL = "https://identical-vivi-faucetdrops-41e9c56b.koyeb.app"
 
 interface CreationItem {
   id: string
@@ -31,11 +31,11 @@ interface QuestOverview {
 }
 
 interface QuizOverview {
-    id: string;
+    code: string;           // Changed from id
     title: string;
     creatorAddress: string;
-    isActive: boolean;
-    created_at: string;
+    status: string;         // Changed from isActive
+    createdAt: string;      // Changed from created_at
 }
 
 export function MyCreationsModal({ faucets = [], address }: { faucets: any[], address?: string }) {
@@ -73,27 +73,29 @@ export function MyCreationsModal({ faucets = [], address }: { faucets: any[], ad
         setQuests(userQuests)
       }
 
-      // 2. Fetch Quizzes
-      try {
-        const quizRes = await fetch(`${API_BASE_URL}/api/quizzes`)
+     try {
+        // FIXED: Using the correct endpoint that the Dashboard uses
+        const quizRes = await fetch(`${API_BASE_URL}/api/quiz/list?t=${Date.now()}`)
+        
         if (quizRes.ok) {
             const quizData = await quizRes.json()
             if (quizData.success && Array.isArray(quizData.quizzes)) {
                 const userQuizzes = quizData.quizzes
-                .filter((q: QuizOverview) => q.creatorAddress.toLowerCase() === address?.toLowerCase())
+                .filter((q: QuizOverview) => q.creatorAddress?.toLowerCase() === address?.toLowerCase())
                 .map((q: QuizOverview) => ({
-                    id: q.id,
+                    id: q.code, // FIXED: Backend uses 'code' as the unique identifier
                     name: q.title,
                     type: 'quiz' as const,
                     chain: "N/A",
-                    createdAt: q.created_at || new Date().toISOString(),
-                    status: q.isActive ? 'active' as const : 'paused' as const
+                    createdAt: q.createdAt || new Date().toISOString(), // FIXED: Backend uses camelCase 'createdAt'
+                    // Map the string status ('waiting', 'active', 'finished') to the allowed union type
+                    status: q.status === 'active' ? 'active' as const : 'paused' as const 
                 }))
                 setQuizzes(userQuizzes)
             }
         }
       } catch (e) {
-          // console.warn("Quizzes endpoint might not exist yet:", e)
+          console.warn("Failed to fetch quizzes:", e)
       }
 
     } catch (err) {

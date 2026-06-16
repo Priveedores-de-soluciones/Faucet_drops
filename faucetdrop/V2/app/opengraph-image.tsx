@@ -4,7 +4,7 @@ import { ImageResponse } from 'next/og'
 export const runtime = 'edge'
 
 // Image metadata
-export const alt = 'FaucetDrops - Automated onchain reward and engagement platform 💧'
+export const alt = 'FaucetDrops - The all-in-one stack for your Web3 User Growth, Engagement and Token Distribution 💧'
 export const size = {
   width: 1200,
   height: 630,
@@ -71,7 +71,7 @@ export default async function Image() {
             zIndex: 10,
           }}
         >
-          Token Drops Made Easy
+          The all-in-one stack for your Web3 User Growth, Engagement and Token Distribution
         </div>
 
         {/* URL Pill */}

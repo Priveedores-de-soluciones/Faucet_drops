@@ -184,46 +184,6 @@
   }
 }
 
-.blended-img3 {
-  /* width: 650px; */
-  border-radius: 12px;
-
-  /* Fade on all four corners */
-  -webkit-mask-image: radial-gradient(
-    ellipse at center,
-    rgba(0, 0, 0, 1) 20%,
-    rgba(0, 0, 0, 0) 100%
-  );
-  mask-image: radial-gradient(
-    ellipse at center,
-    rgba(0, 0, 0, 1) 20%,
-    rgba(0, 0, 0, 0) 100%
-  );
-
-  /* Optional smoothing */
-  filter: blur(0.5px);
-}
-
-.fade-out {
-  opacity: 0;
-  transition: opacity 0.5s ease-out;
-}
-
-@keyframes pulse-slow {
-  0%, 100% {
-    opacity: 0.3;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.6;
-    transform: scale(1.05);
-  }
-}
-
-.animate-pulse-slow {
-  animation: pulse-slow 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
 /* Hide default cursor on desktop */
 /* @media (min-width: 768px) {
   * {

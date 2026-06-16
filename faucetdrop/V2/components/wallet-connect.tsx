@@ -1,236 +1,274 @@
 "use client"
 
 import Link from "next/link"
-import { useState, useEffect, useCallback, useRef } from "react"
-import { usePrivy, useWallets, type User } from '@privy-io/react-auth'
-import { useWallet } from "@/components/wallet-provider"
+import { useState, useEffect, useRef } from "react"
+import { useWallet } from "./wallet-provider"
+import { ConnectModal } from "./connect-modal"
 import { Button } from "@/components/ui/button"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
+  DropdownMenu, DropdownMenuContent, DropdownMenuGroup,
+  DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { LayoutDashboard, LogOut, Copy, ChevronDown, Wallet, User as UserIcon } from "lucide-react"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { LayoutDashboard, LogOut, Wallet, ShoppingBag, ChevronDown, Link2 } from "lucide-react"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
+import { usePathname } from "next/navigation"
 
-const API_BASE_URL = "https://fauctdrop-backend.onrender.com"
+// ─────────────────────────────────────────────────────────────────────────────
 
-export function WalletConnectButton() {
-  const { ready, authenticated, login, logout, user } = usePrivy()
-  const { wallets } = useWallets()
-  const { address, walletType, isConnected } = useWallet()
-  
-  const [dbUsername, setDbUsername] = useState<string | null>(null)
+const ADMIN_ADDRESSES = [
+  "0x9fBC2A0de6e5C5Fd96e8D11541608f5F328C0785",
+].map(a => a.toLowerCase())
+
+interface Props { className?: string }
+
+export function WalletConnectButton({ className }: Props) {
+  const API_BASE = "https://identical-vivi-faucetdrops-41e9c56b.koyeb.app"
+  const {
+    address, isConnected, isConnecting, walletType,
+    session, disconnect, setShowModal,
+  } = useWallet()
+  const pathname = usePathname()
+
+  const [dbUsername,  setDbUsername]  = useState<string | null>(null)
   const [dbAvatarUrl, setDbAvatarUrl] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  
-  // Use a ref to prevent multiple sync calls during React strict mode renders
+  const [loading,     setLoading]     = useState(false)
   const hasSyncedRef = useRef(false)
 
-  // --- FALLBACK HELPERS ---
-  const getFallbackAvatar = useCallback((privyUser: User | null) => {
-    if (!privyUser) return "";
-    const google = privyUser.google as any;
-    const twitter = privyUser.twitter as any;
-    return google?.picture || google?.profilePictureUrl || twitter?.profilePictureUrl || "";
-  }, []);
+  const isStorePage = pathname?.startsWith("/store")
+  const isAdmin     = !!address && ADMIN_ADDRESSES.includes(address.toLowerCase())
 
-  const getFallbackUsername = useCallback((privyUser: User | null) => {
-    if (!privyUser) return "";
-    if (privyUser.twitter?.username) return privyUser.twitter.username;
-    if (privyUser.discord?.username) return privyUser.discord.username;
-    if (privyUser.google?.name) return privyUser.google.name.replace(/\s+/g, '');
-    if (privyUser.email?.address) return privyUser.email.address.split('@')[0];
-    return "User"; // Absolute fallback
-  }, []);
-
-  // --- AUTO-SYNC & FETCH LOGIC ---
+  // ── Fetch / sync profile ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!isConnected || !address || !user) {
-      setDbUsername(null)
-      setDbAvatarUrl(null)
+    if (!isConnected || !address) {
+      setDbUsername(null); setDbAvatarUrl(null)
       hasSyncedRef.current = false
       return
     }
-
-    let isMounted = true
+    let mounted = true
     setLoading(true)
 
-    const fetchOrSyncProfile = async () => {
+    ;(async () => {
       try {
-        // 1. Try to fetch existing profile
-        const response = await fetch(`${API_BASE_URL}/api/users/${address.toLowerCase()}`)
-        let profileExists = false;
-
-        if (response.ok) {
-          const data = await response.json()
-          const profileData = data.profile || (data.username ? data : null)
-
-          if (profileData && profileData.username && profileData.username !== "New User") {
-            // User exists in DB! Set state and exit.
-            profileExists = true;
-            if (isMounted) {
-              setDbUsername(profileData.username)
-              setDbAvatarUrl(profileData.avatar_url || profileData.avatarUrl || "")
+        const res = await fetch(`${API_BASE}/api/users/${address.toLowerCase()}`)
+        if (res.ok) {
+          const data = await res.json()
+          const profile = data.profile ?? (data.username ? data : null)
+          if (profile?.username && profile.username !== "New User") {
+            if (mounted) {
+              setDbUsername(profile.username)
+              setDbAvatarUrl(profile.avatar_url ?? profile.avatarUrl ?? "")
+              return
             }
           }
         }
-
-        // 2. If user doesn't exist, AUTO-SYNC them immediately
-        if (!profileExists && !hasSyncedRef.current) {
-          hasSyncedRef.current = true; // Prevent duplicate calls
-          
-          const fallbackUsername = getFallbackUsername(user) || `user_${address.slice(-4)}`;
-          const fallbackAvatar = getFallbackAvatar(user);
-          const email = user?.email?.address || "";
-          
-          console.log("[AutoSync] Creating new profile for:", fallbackUsername);
-
-          const syncRes = await fetch(`${API_BASE_URL}/api/profile/sync`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                  wallet_address: address,
-                  username: fallbackUsername,
-                  avatar_url: fallbackAvatar,
-                  email: email
-              })
-          });
-          
-          const syncData = await syncRes.json();
-          if (syncData.success && syncData.profile && isMounted) {
-              setDbUsername(syncData.profile.username);
-              setDbAvatarUrl(syncData.profile.avatar_url);
-              
-              // Broadcast to the rest of the app (like the Dashboard) that the profile is ready
-              window.dispatchEvent(new CustomEvent('profileUpdated', {
-                  detail: { username: syncData.profile.username, avatarUrl: syncData.profile.avatar_url }
-              }));
+        if (!hasSyncedRef.current) {
+          hasSyncedRef.current = true
+          const syncRes = await fetch(`${API_BASE}/api/profile/sync`, {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              wallet_address: address,
+              username: `user_${address.slice(-4)}`,
+              avatar_url: "",
+              email: "",
+            }),
+          })
+          const syncData = await syncRes.json()
+          if (syncData.success && syncData.profile && mounted) {
+            setDbUsername(syncData.profile.username)
+            setDbAvatarUrl(syncData.profile.avatar_url)
+            window.dispatchEvent(new CustomEvent("profileUpdated", {
+              detail: { username: syncData.profile.username, avatarUrl: syncData.profile.avatar_url },
+            }))
           }
         }
-      } catch (error) {
-        console.error("❌ Failed to fetch/sync user profile:", error)
+      } catch (e) {
+        console.error("Profile sync error", e)
       } finally {
-        if (isMounted) setLoading(false)
+        if (mounted) setLoading(false)
       }
-    }
+    })()
 
-    fetchOrSyncProfile()
+    return () => { mounted = false }
+  }, [address, isConnected])
 
-    return () => { isMounted = false }
-  }, [address, isConnected, user, getFallbackUsername, getFallbackAvatar])
-
-  // --- LISTEN FOR MANUAL PROFILE SAVES ---
+  // Listen for profile updates from elsewhere
   useEffect(() => {
-    const handleProfileUpdate = (event: CustomEvent) => {
-      const { username: newUsername, avatarUrl: newAvatarUrl } = event.detail
-      if (newUsername) setDbUsername(newUsername)
-      if (newAvatarUrl) setDbAvatarUrl(newAvatarUrl)
+    const handler = (e: CustomEvent) => {
+      const { username, avatarUrl } = e.detail ?? {}
+      if (username) setDbUsername(username)
+      if (avatarUrl) setDbAvatarUrl(avatarUrl)
     }
-    window.addEventListener('profileUpdated' as any, handleProfileUpdate)
-    return () => window.removeEventListener('profileUpdated' as any, handleProfileUpdate)
+    window.addEventListener("profileUpdated" as any, handler)
+    return () => window.removeEventListener("profileUpdated" as any, handler)
   }, [])
 
-  const displayName = dbUsername || "Anonymous";
-  const displayAvatar = dbAvatarUrl || getFallbackAvatar(user);
-  
-  // Dashboard link will automatically use the brand new synced username!
-  const dashboardLink = dbUsername 
-    ? `/dashboard/${dbUsername}` 
-    : `/dashboard/${address?.toLowerCase() || ''}`
+  // ── Provider badge label ──────────────────────────────────────────────────
+  const providerLabel = walletType === "external"
+    ? (session?.provider ?? "Wallet")
+    : (session?.provider
+        ? session.provider.charAt(0).toUpperCase() + session.provider.slice(1)
+        : "Embedded")
 
-  const getWalletName = () => {
-    if (!wallets[0]) return null
-    const wallet = wallets[0]
-    if (wallet.walletClientType === 'privy') return 'Embedded Wallet'
-    return wallet.walletClientType === 'metamask' ? 'MetaMask' :
-           wallet.walletClientType === 'coinbase_wallet' ? 'Coinbase' :
-           'External Wallet'
-  }
+  const displayName   = dbUsername || "Anonymous"
+  const displayAvatar = dbAvatarUrl || ""
+  const dashboardLink = dbUsername
+    ? `/dashboard/${dbUsername}`
+    : `/dashboard/${address?.toLowerCase() ?? ""}`
 
-  if (!ready) {
+  // ── Render ────────────────────────────────────────────────────────────────
+  if (isConnecting) {
     return (
-      <Button size="sm" disabled variant="outline" className="text-xs font-bold uppercase tracking-widest px-6 opacity-50 border-border">
-        Loading...
+      <Button size="sm" disabled variant="outline"
+        className={cn("text-xs font-bold uppercase tracking-widest px-6 opacity-50 border-border", className)}>
+        Connecting…
       </Button>
     )
   }
 
   if (!isConnected) {
     return (
-      <Button onClick={login} size="sm" variant="default" className="text-xs font-bold uppercase tracking-widest px-6 shadow-md hover:scale-105 transition-all">
-        Get Started
-      </Button>
+      <>
+        <Button
+          onClick={() => setShowModal(true)}
+          size="sm" variant="default"
+          className={cn("text-xs font-bold uppercase tracking-widest px-6 shadow-md hover:scale-105 transition-all", className)}
+        >
+          Get Started
+        </Button>
+        <ConnectModal />
+      </>
     )
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="flex items-center gap-2 p-1 sm:pr-3 border-primary/20 hover:bg-primary/5 transition-all rounded-full h-9 relative">
-          <div className="relative">
-            <Avatar className="h-7 w-7 border border-background shadow-sm">
-              <AvatarImage src={displayAvatar} className="object-cover" />
-              <AvatarFallback className="bg-primary/10 text-primary text-[10px]">
-                {loading ? <span className="animate-pulse">...</span> : displayName.charAt(0).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            {walletType === 'external' && (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline" size="sm"
+            className={cn(
+              "flex items-center gap-2 p-1 sm:pr-3 border-primary/20 hover:bg-primary/5 transition-all rounded-full h-9",
+              className
+            )}
+          >
+            <div className="relative">
+              <Avatar className="h-7 w-7 border border-background shadow-sm">
+                <AvatarImage src={displayAvatar} className="object-cover" />
+                <AvatarFallback className="bg-primary/10 text-primary text-[10px]">
+                  {loading
+                    ? <span className="animate-pulse">…</span>
+                    : displayName.charAt(0).toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              {/* Provider badge */}
+              {walletType === "external" ? (
               <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 bg-blue-500 rounded-full border border-background flex items-center justify-center">
                 <Wallet className="h-2 w-2 text-white" />
               </div>
-            )}
-          </div>
-
-          <span className="hidden sm:block text-xs sm:text-sm font-medium max-w-[100px] truncate">
-            {loading ? "..." : displayName}
-          </span>
-          <ChevronDown className="hidden sm:block h-3 w-3 opacity-50" />
-        </Button>
-      </DropdownMenuTrigger>
-
-      <DropdownMenuContent align="end" className="w-56 z-[200]" sideOffset={8}>
-        <DropdownMenuLabel className="font-normal">
-          <div className="flex flex-col space-y-1">
-            <p className="text-sm font-medium leading-none truncate">{displayName}</p>
-            {user?.email && <p className="text-xs leading-none text-muted-foreground truncate">{user.email.address}</p>}
-            {address && (
-              <div className="flex items-center gap-1">
-                <p className="text-xs leading-none text-muted-foreground font-mono">{address.slice(0, 6)}...{address.slice(-4)}</p>
-                {walletType === 'external' && <span className="text-[10px] bg-blue-500/10 text-blue-600 px-1.5 py-0.5 rounded">{getWalletName()}</span>}
+            ) : walletType === "embedded" ? (
+              <div className="absolute -bottom-0.5 -right-0.5 h-3 w-3 bg-emerald-500 rounded-full border border-background flex items-center justify-center">
+                <Wallet className="h-2 w-2 text-white" />
               </div>
+            ) : null}
+            </div>
+            <span className="hidden sm:block text-xs font-medium max-w-[100px] truncate">
+              {loading ? "…" : displayName}
+            </span>
+            <ChevronDown className="hidden sm:block h-3 w-3 opacity-50" />
+          </Button>
+        </DropdownMenuTrigger>
+
+        <DropdownMenuContent align="end" className="w-56 z-[200]" sideOffset={8}>
+          <DropdownMenuLabel className="font-normal">
+            <div className="flex flex-col space-y-1">
+              <p className="text-sm font-medium leading-none truncate">{displayName}</p>
+              {address && (
+                <div className="flex items-center gap-1 flex-wrap">
+                  <p className="text-xs leading-none text-muted-foreground font-mono">
+                    {address.slice(0, 6)}…{address.slice(-4)}
+                  </p>
+                  <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+                    {providerLabel}
+                  </span>
+                </div>
+              )}
+              {/* Linked socials */}
+              {(session?.linkedSocials?.length ?? 0) > 0 && (
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Linked: {session!.linkedSocials!.join(", ")}
+                </p>
+              )}
+            </div>
+          </DropdownMenuLabel>
+
+          <DropdownMenuSeparator />
+
+          <DropdownMenuGroup>
+            {isStorePage ? (
+              isAdmin ? (
+                <DropdownMenuItem asChild>
+                  <Link href="/store/admin" className="cursor-pointer flex items-center gap-2">
+                    <LayoutDashboard className="h-4 w-4" /><span>Admin</span>
+                  </Link>
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem asChild>
+                  <Link href="/store/orders" className="cursor-pointer flex items-center gap-2">
+                    <ShoppingBag className="h-4 w-4" /><span>My Orders</span>
+                  </Link>
+                </DropdownMenuItem>
+              )
+            ) : (
+              <DropdownMenuItem asChild>
+                <Link
+                  href={dashboardLink}
+                  className={cn(
+                    "cursor-pointer flex items-center gap-2",
+                    (loading || !dbUsername) && "pointer-events-none opacity-50"
+                  )}
+                >
+                  <LayoutDashboard className="h-4 w-4" />
+                  <span>{loading ? "Loading…" : dbUsername ? "Profile" : "Dashboard"}</span>
+                </Link>
+              </DropdownMenuItem>
             )}
-          </div>
-        </DropdownMenuLabel>
-        
-        <DropdownMenuSeparator />
-        
-        <DropdownMenuGroup>
-          <DropdownMenuItem asChild>
-            <Link href={dashboardLink} className="cursor-pointer flex items-center gap-2"> 
-              {dbUsername ? <UserIcon className="h-4 w-4" /> : <LayoutDashboard className="h-4 w-4" />}
-              <span>{dbUsername ? "Profile" : "Dashboard"}</span>
-            </Link>
+
+            {address && (
+              <DropdownMenuItem
+                onClick={() => { navigator.clipboard.writeText(address); toast.success("Address copied!") }}
+                className="cursor-pointer flex items-center gap-2"
+              >
+                <Wallet className="h-4 w-4" /><span>Copy Address</span>
+              </DropdownMenuItem>
+            )}
+
+            {/* Link additional social — only available for embedded wallets */}
+            
+              <DropdownMenuItem
+                onClick={() => setShowModal(true)}
+                className="cursor-pointer flex items-center gap-2"
+              >
+                <Link2 className="h-4 w-4" /><span>Link Account</span>
+              </DropdownMenuItem>
+            
+          </DropdownMenuGroup>
+
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={disconnect}
+            className="cursor-pointer flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50"
+          >
+            <LogOut className="h-4 w-4" /><span>Disconnect</span>
           </DropdownMenuItem>
-          {address && (
-            <DropdownMenuItem onClick={() => { navigator.clipboard.writeText(address); toast.success("Address copied to clipboard!") }} className="cursor-pointer flex items-center gap-2">
-              <Copy className="h-4 w-4" />
-              <span>Copy Address</span>
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuGroup>
-      
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={logout} className="cursor-pointer flex items-center gap-2 text-red-600 focus:text-red-600 focus:bg-red-50">
-          <LogOut className="h-4 w-4" />
-          <span>Disconnect</span>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {/* Modal is always mounted when connected (for link social flow) */}
+      <ConnectModal />
+    </>
   )
 }

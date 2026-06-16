@@ -1,563 +1,154 @@
-"use client"
+'use client';
 
-import { useEffect, useState, useCallback } from "react"
-import { Contract, JsonRpcProvider, isAddress } from "ethers"
-import { useNetwork } from "@/hooks/use-network"
-import { FACTORY_ABI } from "@/lib/abis"
-import { Loader2, Activity, RefreshCw, History, Download, Upload } from "lucide-react"
-import { Button } from "@/components/ui/button"
-
-// Cache keys for transaction data
-const TRANSACTION_STORAGE_KEYS = {
-  NETWORK_STATS: 'transaction_network_stats',
-  ALL_TRANSACTIONS: 'transaction_all_transactions',
-  TOTAL_TRANSACTIONS: 'transaction_total_count',
-  LAST_UPDATED: 'transaction_last_updated',
-  HISTORY: 'transaction_history',
-  VERSION: 'transaction_version'
-};
-
-// Cache duration (5 minutes)
-const CACHE_DURATION = 5 * 60 * 1000;
-
-// Helper functions for localStorage
-function saveToLocalStorage(key: string, data: any) {
-  try {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(key, JSON.stringify(data, (k, v) => 
-        typeof v === 'bigint' ? v.toString() : v
-      ));
-    } 
-  } catch (error) {
-    console.warn('Failed to save to localStorage:', error);
-  }
-}
-
-function loadFromLocalStorage<T>(key: string): T | null {
-  try {
-    if (typeof window !== 'undefined') {
-      const data = localStorage.getItem(key);
-      if (!data) return null;
-      
-      return JSON.parse(data, (k, v) => {
-        if (k === 'amount' && typeof v === 'string' && /^\d+$/.test(v)) {
-          return BigInt(v);
-        }
-        return v;
-      });
-    }
-    return null;
-  } catch (error) {
-    console.warn('Failed to load from localStorage:', error);
-    return null;
-  }
-}
-
-function isCacheValid(): boolean {
-  const lastUpdated = loadFromLocalStorage<number>(TRANSACTION_STORAGE_KEYS.LAST_UPDATED);
-  return lastUpdated ? Date.now() - lastUpdated < CACHE_DURATION : false;
-}
-
-interface NetworkStats {
-  name: string
-  chainId: number
-  totalTransactions: number
-  color: string
-  factoryAddresses: string[]
-  rpcUrl: string
-}
-
-interface TransactionData {
-  faucetAddress: string
-  transactionType: string
-  initiator: string
-  amount: bigint
-  isEther: boolean
-  timestamp: number
-  networkName: string
-  chainId: number
-  txHash?: string
-  blockNumber?: number
-}
-
-interface StoredTransactionHistory {
-  timestamp: number
-  networkStats: NetworkStats[]
-  totalTransactions: number
-  allTransactions: TransactionData[]
-  fetchedAt: string
-}
-
-interface TransactionStorage {
-  history: StoredTransactionHistory[]
-  lastUpdated: number
-  version: string
-}
-
-const NETWORK_COLORS: Record<string, string> = {
-  "Celo": "#35D07F",
-  "Lisk": "#0D4477", 
-  "Base": "#0052FF",
-  "Arbitrum": "#28A0F0",
-  "Ethereum": "#627EEA",
-  "Polygon": "#8247E5",
-  "Optimism": "#FF0420",
-  "default": "#6B7280"
-}
-
-async function getAllTransactionsFromNetwork(
-  provider: JsonRpcProvider,
-  network: any
-): Promise<{
-  transactions: TransactionData[]
-  totalTransactions: number
-}> {
-  try {
-    let allTransactions: any[] = [];
-
-    if (network.factoryAddresses && network.factoryAddresses.length > 0) {
-      for (const factoryAddress of network.factoryAddresses) {
-        if (!isAddress(factoryAddress)) {
-          console.warn(`Invalid factory address ${factoryAddress} on ${network.name}, skipping`);
-          continue;
-        }
-
-        const code = await provider.getCode(factoryAddress);
-        if (code === "0x") {
-          console.warn(`No contract at factory address ${factoryAddress} on ${network.name}`);
-          continue;
-        }
-
-        const factoryContract = new Contract(factoryAddress, FACTORY_ABI, provider);
-
-        try {
-          console.log(`Fetching transactions from factory ${factoryAddress} on ${network.name}...`);
-          
-          let transactions;
-          try {
-            transactions = await factoryContract.getAllTransactions();
-          } catch (error) {
-            try {
-              const totalCount = await factoryContract.getTotalTransactions();
-              console.log(`Factory ${factoryAddress} has ${totalCount} total transactions (count only)`);
-              transactions = Array(Number(totalCount)).fill(null).map((_, index) => ({
-                faucetAddress: factoryAddress,
-                transactionType: "unknown",
-                initiator: "0x0000000000000000000000000000000000000000",
-                amount: BigInt(0),
-                isEther: false,
-                timestamp: Math.floor(Date.now() / 1000) - index * 60
-              }));
-            } catch (fallbackError) {
-              console.warn(`No transaction methods available for factory ${factoryAddress}:`, fallbackError);
-              continue;
-            }
-          }
-          
-          console.log(`Found ${transactions.length} transactions from factory ${factoryAddress}`);
-          allTransactions.push(...transactions);
-        } catch (error) {
-          console.warn(`Error fetching transactions from factory ${factoryAddress}:`, error);
-        }
-      }
-    } else {
-      console.log(`No factory addresses configured for ${network.name}`);
-    }
-
-    const mappedTransactions: TransactionData[] = allTransactions.map((tx: any) => ({
-      faucetAddress: tx.faucetAddress || "unknown",
-      transactionType: tx.transactionType || "unknown",
-      initiator: tx.initiator || "0x0000000000000000000000000000000000000000",
-      amount: typeof tx.amount === 'bigint' ? tx.amount : BigInt(tx.amount || 0),
-      isEther: tx.isEther || false,
-      timestamp: Number(tx.timestamp) || Math.floor(Date.now() / 1000),
-      networkName: network.name,
-      chainId: network.chainId,
-      txHash: tx.txHash,
-      blockNumber: tx.blockNumber
-    }));
-
-    const result = {
-      transactions: mappedTransactions,
-      totalTransactions: mappedTransactions.length
-    };
-
-    console.log(`Total transactions fetched from ${network.name}: ${result.totalTransactions}`);
-    return result;
-  } catch (error: any) {
-    console.error(`Error fetching transactions from ${network.name}:`, error);
-    return {
-      transactions: [],
-      totalTransactions: 0
-    };
-  }
-}
-
-async function getAllTransactionsFromAllNetworks(networks: any[]): Promise<{
-  allTransactions: TransactionData[]
-  networkStats: NetworkStats[]
-  totalTransactions: number
-}> {
-  const allTransactions: TransactionData[] = [];
-  const networkStats: NetworkStats[] = [];
-  let totalTransactions = 0;
-
-  for (const network of networks) {
-    try {
-      console.log(`Fetching transactions from ${network.name}...`);
-      
-      const provider = new JsonRpcProvider(network.rpcUrl);
-      const { transactions, totalTransactions: networkTotal } = await getAllTransactionsFromNetwork(provider, network);
-      
-      allTransactions.push(...transactions);
-      totalTransactions += networkTotal;
-      
-      networkStats.push({
-        name: network.name,
-        chainId: network.chainId,
-        totalTransactions: networkTotal,
-        color: NETWORK_COLORS[network.name] || NETWORK_COLORS.default,
-        factoryAddresses: network.factoryAddresses || [],
-        rpcUrl: network.rpcUrl
-      });
-      
-      console.log(`Added ${networkTotal} transactions from ${network.name}`);
-    } catch (error) {
-      console.error(`Error processing ${network.name}:`, error);
-      
-      networkStats.push({
-        name: network.name,
-        chainId: network.chainId,
-        totalTransactions: 0,
-        color: NETWORK_COLORS[network.name] || NETWORK_COLORS.default,
-        factoryAddresses: network.factoryAddresses || [],
-        rpcUrl: network.rpcUrl
-      });
-    }
-  }
-
-  networkStats.sort((a, b) => b.totalTransactions - a.totalTransactions);
-
-  return {
-    allTransactions,
-    networkStats,
-    totalTransactions
-  };
-}
+import { Loader2, Activity } from "lucide-react";
+import { useDashboardContext } from "@/components/analytics-dashboard";
 
 export function TransactionsPerDayChart() {
-  const { networks } = useNetwork()
-  const [networkStats, setNetworkStats] = useState<NetworkStats[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [totalTransactions, setTotalTransactions] = useState(0)
-  const [allTransactions, setAllTransactions] = useState<TransactionData[]>([])
-  
-  const [transactionStorage, setTransactionStorage] = useState<TransactionStorage>({
-    history: [],
-    lastUpdated: 0,
-    version: "1.0.0"
-  })
-  const [showHistory, setShowHistory] = useState(false)
+  const { data, loading } = useDashboardContext();
 
-  const saveToStorage = useCallback((
-    networkStats: NetworkStats[], 
-    totalTransactions: number, 
-    allTransactions: TransactionData[]
-  ) => {
-    const newEntry: StoredTransactionHistory = {
-      timestamp: Date.now(),
-      networkStats,
-      totalTransactions,
-      allTransactions,
-      fetchedAt: new Date().toISOString()
-    }
-
-    setTransactionStorage(prev => {
-      const newHistory = [...prev.history, newEntry]
-      const trimmedHistory = newHistory.slice(-50)
-      
-      saveToLocalStorage(TRANSACTION_STORAGE_KEYS.HISTORY, trimmedHistory)
-      saveToLocalStorage(TRANSACTION_STORAGE_KEYS.NETWORK_STATS, networkStats)
-      saveToLocalStorage(TRANSACTION_STORAGE_KEYS.ALL_TRANSACTIONS, allTransactions)
-      saveToLocalStorage(TRANSACTION_STORAGE_KEYS.TOTAL_TRANSACTIONS, totalTransactions)
-      saveToLocalStorage(TRANSACTION_STORAGE_KEYS.LAST_UPDATED, Date.now())
-      saveToLocalStorage(TRANSACTION_STORAGE_KEYS.VERSION, prev.version)
-      
-      return {
-        ...prev,
-        history: trimmedHistory,
-        lastUpdated: Date.now()
-      }
-    })
-  }, [])
-
-  const loadFromHistory = useCallback((entry: StoredTransactionHistory) => {
-    setNetworkStats(entry.networkStats)
-    setTotalTransactions(entry.totalTransactions)
-    setAllTransactions(entry.allTransactions)
-  }, [])
-
-  const exportData = useCallback(() => {
-    const dataStr = JSON.stringify(transactionStorage, (key, value) => {
-      if (typeof value === 'bigint') {
-        return value.toString()
-      }
-      return value
-    }, 2)
-    
-    const dataBlob = new Blob([dataStr], { type: 'application/json' })
-    const url = URL.createObjectURL(dataBlob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `transaction-history-${new Date().toISOString().split('T')[0]}.json`
-    link.click()
-    URL.revokeObjectURL(url)
-  }, [transactionStorage])
-
-  const importData = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      try {
-        const importedData = JSON.parse(e.target?.result as string)
-        const processedData = {
-          ...importedData,
-          history: importedData.history.map((entry: any) => ({
-            ...entry,
-            allTransactions: entry.allTransactions.map((tx: any) => ({
-              ...tx,
-              amount: BigInt(tx.amount)
-            }))
-          }))
-        }
-        setTransactionStorage(processedData)
-        saveToLocalStorage(TRANSACTION_STORAGE_KEYS.HISTORY, processedData.history)
-        saveToLocalStorage(TRANSACTION_STORAGE_KEYS.VERSION, processedData.version)
-        console.log('Transaction history imported successfully')
-      } catch (error) {
-        console.error('Error importing transaction history:', error)
-      }
-    }
-    reader.readAsText(file)
-  }, [])
-
-  const fetchTransactions = async (isRefresh = false) => {
-    if (isRefresh) {
-      setRefreshing(true)
-    } else {
-      setLoading(true)
-    }
-
-    try {
-      if (!isRefresh && isCacheValid()) {
-        const cachedNetworkStats = loadFromLocalStorage<NetworkStats[]>(TRANSACTION_STORAGE_KEYS.NETWORK_STATS)
-        const cachedAllTransactions = loadFromLocalStorage<TransactionData[]>(TRANSACTION_STORAGE_KEYS.ALL_TRANSACTIONS)
-        const cachedTotal = loadFromLocalStorage<number>(TRANSACTION_STORAGE_KEYS.TOTAL_TRANSACTIONS)
-        const cachedHistory = loadFromLocalStorage<StoredTransactionHistory[]>(TRANSACTION_STORAGE_KEYS.HISTORY)
-        
-        if (cachedNetworkStats && cachedAllTransactions && cachedTotal !== null && cachedHistory) {
-          console.log('Using cached transaction data')
-          setNetworkStats(cachedNetworkStats)
-          setAllTransactions(cachedAllTransactions)
-          setTotalTransactions(cachedTotal)
-          setTransactionStorage({
-            history: cachedHistory,
-            lastUpdated: loadFromLocalStorage<number>(TRANSACTION_STORAGE_KEYS.LAST_UPDATED) || 0,
-            version: loadFromLocalStorage<string>(TRANSACTION_STORAGE_KEYS.VERSION) || "1.0.0"
-          })
-          setLoading(false)
-          return
-        }
-      }
-
-      console.log("Fetching transactions from all networks...");
-      
-      const {
-        allTransactions: fetchedTransactions,
-        networkStats: fetchedStats,
-        totalTransactions: total
-      } = await getAllTransactionsFromAllNetworks(networks);
-
-      setAllTransactions(fetchedTransactions);
-      setNetworkStats(fetchedStats);
-      setTotalTransactions(total);
-      
-      saveToStorage(fetchedStats, total, fetchedTransactions);
-      
-      console.log(`Total transactions across all networks: ${total}`);
-      console.log("Network breakdown:", fetchedStats.map(s => `${s.name}: ${s.totalTransactions}`).join(", "));
-      
-    } catch (error) {
-      console.error("Error fetching transactions:", error);
-      const cachedNetworkStats = loadFromLocalStorage<NetworkStats[]>(TRANSACTION_STORAGE_KEYS.NETWORK_STATS)
-      const cachedAllTransactions = loadFromLocalStorage<TransactionData[]>(TRANSACTION_STORAGE_KEYS.ALL_TRANSACTIONS)
-      const cachedTotal = loadFromLocalStorage<number>(TRANSACTION_STORAGE_KEYS.TOTAL_TRANSACTIONS)
-      const cachedHistory = loadFromLocalStorage<StoredTransactionHistory[]>(TRANSACTION_STORAGE_KEYS.HISTORY)
-      
-      if (cachedNetworkStats && cachedAllTransactions && cachedTotal !== null && cachedHistory) {
-        console.log('Using cached transaction data as fallback')
-        setNetworkStats(cachedNetworkStats)
-        setAllTransactions(cachedAllTransactions)
-        setTotalTransactions(cachedTotal)
-        setTransactionStorage({
-          history: cachedHistory,
-          lastUpdated: loadFromLocalStorage<number>(TRANSACTION_STORAGE_KEYS.LAST_UPDATED) || 0,
-          version: loadFromLocalStorage<string>(TRANSACTION_STORAGE_KEYS.VERSION) || "1.0.0"
-        })
-      }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    const cachedNetworkStats = loadFromLocalStorage<NetworkStats[]>(TRANSACTION_STORAGE_KEYS.NETWORK_STATS)
-    const cachedAllTransactions = loadFromLocalStorage<TransactionData[]>(TRANSACTION_STORAGE_KEYS.ALL_TRANSACTIONS)
-    const cachedTotal = loadFromLocalStorage<number>(TRANSACTION_STORAGE_KEYS.TOTAL_TRANSACTIONS)
-    const cachedHistory = loadFromLocalStorage<StoredTransactionHistory[]>(TRANSACTION_STORAGE_KEYS.HISTORY)
-    
-    if (cachedNetworkStats && cachedAllTransactions && cachedTotal !== null && cachedHistory && isCacheValid()) {
-      console.log('Loading cached transaction data on mount')
-      setNetworkStats(cachedNetworkStats)
-      setAllTransactions(cachedAllTransactions)
-      setTotalTransactions(cachedTotal)
-      setTransactionStorage({
-        history: cachedHistory,
-        lastUpdated: loadFromLocalStorage<number>(TRANSACTION_STORAGE_KEYS.LAST_UPDATED) || 0,
-        version: loadFromLocalStorage<string>(TRANSACTION_STORAGE_KEYS.VERSION) || "1.0.0"
-      })
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (networks.length > 0) {
-      if (!isCacheValid()) {
-        fetchTransactions();
-      }
-    }
-  }, [networks]);
-
-  if (loading) {
+  if (loading || !data) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
-          <p className="text-sm text-muted-foreground">Loading transactions from all networks...</p>
-        </div>
+      <div className="flex justify-center items-center h-64">
+        <Loader2 className="animate-spin h-8 w-8 text-muted-foreground" />
       </div>
-    )
+    );
   }
 
+  const total = data.total_transactions || 1;
+  const sorted = [...data.network_transactions].sort(
+    (a, b) => b.totalTransactions - a.totalTransactions
+  );
+
+  // SVG Donut Chart Math
+  const radius = 56;
+  const strokeWidth = 14;
+  const circumference = 2 * Math.PI * radius;
+  let currentOffset = 0;
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="text-center flex-1">
-          <p className="text-4xl font-bold text-primary">{totalTransactions.toLocaleString()}</p>
-          <p className="text-sm text-muted-foreground">
-            Total transactions across all networks
-          </p>
+    <div className="flex flex-col md:flex-row gap-8 items-center md:items-stretch">
+      
+      {/* Left: Orbital Gauge Chart */}
+      <div className="relative flex flex-col items-center justify-center shrink-0 w-48 h-48 md:w-56 md:h-56">
+        {/* Decorative background glow */}
+        <div className="absolute inset-0 bg-primary/5 rounded-full blur-2xl pointer-events-none" />
+        
+        <svg viewBox="0 0 160 160" className="w-full h-full -rotate-90 relative z-10 filter drop-shadow-md">
+          {/* Base Track */}
+          <circle
+            cx="80"
+            cy="80"
+            r={radius}
+            fill="transparent"
+            stroke="currentColor"
+            strokeWidth={strokeWidth}
+            className="text-muted/20"
+          />
+          {/* Data Slices */}
+          {sorted.map((net) => {
+            const pct = net.totalTransactions / total;
+            const strokeLength = pct * circumference;
+            const dashOffset = -currentOffset;
+            
+            // Add a small gap between segments unless it's the only one
+            const gap = sorted.length > 1 ? 3 : 0; 
+            const visibleLength = Math.max(0, strokeLength - gap);
+
+            currentOffset += strokeLength;
+
+            return (
+              <circle
+                key={net.name}
+                cx="80"
+                cy="80"
+                r={radius}
+                fill="transparent"
+                stroke={net.color}
+                strokeWidth={strokeWidth}
+                strokeDasharray={`${visibleLength} ${circumference}`}
+                strokeDashoffset={dashOffset}
+                className="transition-all duration-1000 ease-out hover:opacity-80 cursor-crosshair"
+              >
+                <title>{`${net.name}: ${((pct) * 100).toFixed(1)}%`}</title>
+              </circle>
+            );
+          })}
+        </svg>
+
+        {/* Center Metric */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+          <Activity className="h-4 w-4 text-muted-foreground mb-1 opacity-50" />
+          <span className="text-2xl md:text-3xl font-black tracking-tighter">
+            {total >= 10000 ? `${(total / 1000).toFixed(1)}k` : total.toLocaleString()}
+          </span>
+          <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mt-0.5">
+            Total Txns
+          </span>
         </div>
-       
       </div>
 
-      {showHistory && (
-        <div className="border rounded-lg p-4 bg-card">
-          <h3 className="text-lg font-semibold mb-4">Transaction History</h3>
-          {transactionStorage.history.length === 0 ? (
-            <p className="text-muted-foreground">No historical data available</p>
-          ) : (
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {transactionStorage.history.slice().reverse().map((entry, index) => (
-                <div
-                  key={entry.timestamp}
-                  className="flex items-center justify-between p-3 border rounded cursor-pointer hover:bg-muted/50"
-                  onClick={() => loadFromHistory(entry)}
-                >
-                  <div>
-                    <p className="font-medium">{entry.totalTransactions.toLocaleString()} transactions</p>
-                    <p className="text-sm text-muted-foreground">
-                      {new Date(entry.timestamp).toLocaleString()}
-                    </p>
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    {entry.networkStats.filter(s => s.totalTransactions > 0).length} networks active
-                  </div>
+      {/* Right: Frosted Data Matrix (Leaderboard) */}
+      <div className="flex-1 w-full flex flex-col gap-3">
+        {sorted.map((net, i) => {
+          const pct = ((net.totalTransactions / total) * 100).toFixed(1);
+          const isTop = i === 0;
+
+          return (
+            <div
+              key={net.name}
+              className={`group relative flex items-center justify-between p-3.5 rounded-xl border bg-background overflow-hidden transition-all duration-300 hover:shadow-md ${
+                isTop ? 'shadow-sm' : ''
+              }`}
+              style={{
+                borderColor: isTop ? `${net.color}40` : 'var(--border)',
+              }}
+            >
+              {/* Subtle hover background glow */}
+              <div 
+                className="absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity duration-300"
+                style={{ backgroundColor: net.color }} 
+              />
+              
+              <div className="flex items-center gap-3.5 relative z-10">
+                {/* Rank & Color Pill */}
+                <div className="flex items-center gap-2">
+                  <span className="w-4 text-center text-xs font-bold text-muted-foreground/50">
+                    {i + 1}
+                  </span>
+                  <div 
+                    className="w-1.5 h-8 rounded-full shadow-inner" 
+                    style={{ backgroundColor: net.color }} 
+                  />
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
-      {transactionStorage.history.length > 0 && (
-        <div className="text-sm text-muted-foreground">
-          Last updated: {new Date(transactionStorage.lastUpdated).toLocaleString()}
-          {transactionStorage.history.length}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {networkStats.map((network) => (
-          <div
-            key={`${network.name}-${network.chainId}`}
-            className="p-4 rounded-lg border bg-card hover:shadow-lg transition-shadow"
-            style={{ borderLeftColor: network.color, borderLeftWidth: "4px" }}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <Activity className="h-5 w-5" style={{ color: network.color }} />
+                {/* Network Info */}
                 <div>
-                  <h3 className="font-semibold">{network.name}</h3>
-                  
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm">{net.name}</span>
+                    
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {pct}% Dominance
+                    </span>
+                  </div>
                 </div>
               </div>
-              <div className="text-right">
-                <p className="text-2xl font-bold">{network.totalTransactions.toLocaleString()}</p>
-                <p className="text-xs text-muted-foreground">transactions</p>
-              </div>
-            </div>
 
-            <div className="mt-3">
-              <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                <div
-                  className="h-2 rounded-full transition-all duration-300"
-                  style={{
-                    backgroundColor: network.color,
-                    width: `${totalTransactions > 0 ? (network.totalTransactions / totalTransactions) * 100 : 0}%`,
-                  }}
-                />
-              </div>
-              <div className="flex justify-between mt-1">
-                <p className="text-xs text-muted-foreground">
-                  {totalTransactions > 0 ? ((network.totalTransactions / totalTransactions) * 100).toFixed(1) : 0}% of total
+              {/* Transaction Count */}
+              <div className="relative z-10 text-right">
+                <p className="font-bold tabular-nums text-sm">
+                  {net.totalTransactions.toLocaleString()}
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  Chain ID: {network.chainId}
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mt-0.5">
+                  Txns
                 </p>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
-
-      {totalTransactions === 0 && !loading && (
-        <div className="text-center py-12">
-          <Activity className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
-          <h3 className="text-lg font-medium mb-2">No Transactions Found</h3>
-          <p className="text-muted-foreground mb-4">
-            No transactions have been recorded across any network yet.
-          </p>
-          <Button onClick={() => fetchTransactions(true)} variant="outline">
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Try Again
-          </Button>
-        </div>
-      )}
+      
     </div>
-  )
+  );
 }

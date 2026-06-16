@@ -14,7 +14,7 @@ const FloatingShapes: React.FC = () => {
 
   useEffect(() => {
     const currentShapes = shapesRef.current; // Capture the current value
-  
+
     currentShapes.forEach((shape, i) => {
       if (shape) gsap.to(shape, {
         rotation: Math.random() * 360,
@@ -25,7 +25,7 @@ const FloatingShapes: React.FC = () => {
         delay: i * 0.2
       });
     });
-  
+
     return () => {
       currentShapes.forEach(shape => {
         if (shape) gsap.killTweensOf(shape); // Use the captured value
@@ -119,7 +119,7 @@ const NetworkLogo = ({ src, alt }: { src: string; alt: string }) => {
   }, []);
 
   return (
-    <div 
+    <div
       ref={logoRef}
       className="relative h-12 w-32 flex items-center justify-center cursor-pointer"
     >
@@ -200,8 +200,9 @@ export default function Networks() {
     { src: "/networks/celo.svg", alt: "Celo" },
     { src: "/networks/base.svg", alt: "Base" },
     { src: "/networks/lisk.svg", alt: "Lisk" },
-    { src: "/networks/arbitrum.svg", alt: "Arbitrum" },
-    { src: "/networks/self.svg", alt: "Self" }
+    { src: "/networks/arb.png", alt: "Arbitrum" },
+    { src: "/networks/self.png", alt: "Self" },
+    { src: "/networks/BNB.svg", alt: "BNB" },
   ];
 
   useEffect(() => {
@@ -243,7 +244,7 @@ export default function Networks() {
       if (headlineRef.current) {
         const text = headlineRef.current.textContent || '';
         const chars = text.split('');
-        
+
         headlineRef.current.innerHTML = chars
           .map((char) => {
             if (char === ' ') return '<span class="inline-block">&nbsp;</span>';
@@ -296,7 +297,7 @@ export default function Networks() {
   }, []);
 
   return (
-    <div 
+    <div
       ref={sectionRef}
       className="relative mx-auto max-w-full px-0 w-[1280px] py-14 max-md:py-5 overflow-hidden"
     >
@@ -321,17 +322,25 @@ export default function Networks() {
 
       <div className="flex flex-col items-center justify-center gap-10 px-4 text-center relative z-10">
         {/* Headline with character reveal */}
-        <h2 
-          ref={headlineRef}
-          className="text-2xl md:text-3xl lg:text-4xl xl:text-5xl font-bold text-white leading-relaxed relative"
-        >
-          The future of Web3 user acquisition is automated, verifiable and fun. We&apos;re building it!
-        </h2>
+        <div>
+          <h2
+            ref={headlineRef}
+            className="text-2xl md:text-3xl lg:text-4xl xl:text-5xl font-bold text-white leading-relaxed relative"
+          >
+            The future of Web3 user acquisition is automated,
+          </h2>
+          <h2
+            ref={headlineRef}
+            className="text-2xl md:text-3xl lg:text-4xl xl:text-5xl font-bold text-white leading-relaxed relative"
+          >
+            verifiable and fun. We&apos;re building it!
+          </h2>
+        </div>
 
         {/* Network Logos Infinite Scroll */}
         <div className="relative w-full">
           <div className="relative flex w-full flex-nowrap overflow-hidden h-[100px]">
-            <div 
+            <div
               ref={scrollContainerRef}
               className="flex items-center gap-20"
             >
@@ -341,7 +350,7 @@ export default function Networks() {
               ))}
             </div>
           </div>
-        </div>  
+        </div>
       </div>
     </div>
   );
